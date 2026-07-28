@@ -1,0 +1,13 @@
+server:
+  port: 8083
+
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/trade_db?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&readOnlyPropagatesToServer=true
+    username: readonly_user
+    password: readonly_password
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
