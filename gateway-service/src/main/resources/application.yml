@@ -4,13 +4,44 @@ server:
 spring:
   application:
     name: gateway-service
+  config:
+    import: optional:nacos:${spring.application.name}.yaml?refresh=true
   cloud:
     nacos:
       config:
-        import-check:
-          enabled: false
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
       discovery:
         server-addr: 127.0.0.1:8848
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+      routes:
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - StripPrefix=1
+        - id: trade-service
+          uri: lb://trade-service
+          predicates:
+            - Path=/api/trade/**,/api/stock/**
+          filters:
+            - StripPrefix=1
+        - id: analysis-service
+          uri: lb://analysis-service
+          predicates:
+            - Path=/api/analysis/**
+          filters:
+            - StripPrefix=1
+        - id: data-service
+          uri: lb://data-service
+          predicates:
+            - Path=/api/data/**
+          filters:
+            - StripPrefix=1
 
 jwt:
   secret: your-256-bit-secret-key-here-must-be-at-least-32-characters-long

@@ -27,4 +27,6 @@ public interface TradeRecordService extends IService<TradeRecord> {
     List<TradeVO> queryByCondition(TradeQueryDTO queryDTO);
 
     StatisticsVO getStatistics(TradeQueryDTO queryDTO);
+
+    boolean clearAllByUserId(Long userId);
 }

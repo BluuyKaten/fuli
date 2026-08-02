@@ -158,6 +158,31 @@ public class AuthController {
         return Result.success("入账成功", true);
     }
 
+    @GetMapping("/internal/userCash")
+    public Result<BigDecimal> getUserCash(@RequestParam Long userId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            return Result.error("用户不存在");
+        }
+        return Result.success(user.getCash());
+    }
+
+    @GetMapping("/internal/userInitialCash")
+    public Result<BigDecimal> getUserInitialCash(@RequestParam Long userId) {
+        return Result.success(new BigDecimal("200000.00"));
+    }
+
+    @PutMapping("/internal/resetCash")
+    public Result<Boolean> resetCash(@RequestParam Long userId, @RequestParam BigDecimal newCash) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            return Result.error("用户不存在");
+        }
+        user.setCash(newCash);
+        userService.updateById(user);
+        return Result.success("重置成功", true);
+    }
+
     @PutMapping("/password")
     public Result<Boolean> changePassword(@RequestBody Map<String, String> params) {
         Long userId = getCurrentUserId();

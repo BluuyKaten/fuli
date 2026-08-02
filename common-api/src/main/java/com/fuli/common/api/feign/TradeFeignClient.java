@@ -6,6 +6,7 @@ import com.fuli.common.api.dto.TradeQueryDTO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,4 +32,7 @@ public interface TradeFeignClient {
 
     @PostMapping("/trade/queryByCondition")
     Result<List<TradeVO>> queryByCondition(@RequestBody TradeQueryDTO queryDTO);
+
+    @DeleteMapping("/trade/internal/clearAll")
+    Result<Boolean> clearAll(@RequestParam("userId") Long userId);
 }

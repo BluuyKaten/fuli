@@ -6,6 +6,7 @@
         <a-menu-item key="Dashboard">仪表盘</a-menu-item>
         <a-menu-item key="TradeList">交易记录</a-menu-item>
         <a-menu-item key="KlineChart">K线图</a-menu-item>
+        <a-menu-item key="StockSync">数据同步</a-menu-item>
         <a-menu-item key="AccountProfile">账户信息</a-menu-item>
       </a-menu>
       <div class="user-info">

@@ -38,6 +38,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'K线图' }
       },
       {
+        path: 'sync',
+        name: 'StockSync',
+        component: () => import('@/views/stock/StockSync.vue'),
+        meta: { title: '数据同步' }
+      },
+      {
         path: 'account',
         name: 'AccountProfile',
         component: () => import('@/views/account/ProfilePage.vue'),

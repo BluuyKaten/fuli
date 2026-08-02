@@ -49,27 +49,30 @@
 
       <a-divider />
 
-      <div v-if="selectedPoints.length > 0">
-        <h3>已选买卖点</h3>
-        <a-table :columns="pointColumns" :data-source="selectedPoints" row-key="id" size="small" :pagination="false">
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'type'">
-              <a-tag :color="record.type === 1 ? 'blue' : 'green'">{{ record.type === 1 ? '买入' : '卖出' }}</a-tag>
-            </template>
-            <template v-if="column.key === 'quantity'">
-              <a-input-number v-model:value="record.quantity" :min="100" :step="100" size="small" style="width: 100px" />
-            </template>
-            <template v-if="column.key === 'amount'">
-              <span :style="{ color: record.type === 1 ? '#1677ff' : '#52c41a' }">
-                ¥{{ (record.price * record.quantity).toLocaleString() }}
-              </span>
-            </template>
-            <template v-if="column.key === 'action'">
-              <a @click="removePoint(record.id)" style="color: #cf1322">删除</a>
-            </template>
-          </template>
-        </a-table>
-      </div>
+       <div v-if="selectedPoints.length > 0">
+         <h3>已选买卖点</h3>
+         <a-table :columns="pointColumns" :data-source="selectedPoints" row-key="id" size="small" :pagination="false">
+           <template #bodyCell="{ column, record }">
+             <template v-if="column.key === 'type'">
+               <a-tag :color="record.type === 1 ? 'blue' : 'green'">{{ record.type === 1 ? '买入' : '卖出' }}</a-tag>
+             </template>
+             <template v-if="column.key === 'price'">
+               <a-input-number v-model:value="record.price" :min="0.01" :step="0.01" :precision="2" size="small" style="width: 100px" />
+             </template>
+             <template v-if="column.key === 'quantity'">
+               <a-input-number v-model:value="record.quantity" :min="100" :step="100" size="small" style="width: 100px" />
+             </template>
+             <template v-if="column.key === 'amount'">
+               <span :style="{ color: record.type === 1 ? '#1677ff' : '#52c41a' }">
+                 ¥{{ (record.price * record.quantity).toLocaleString() }}
+               </span>
+             </template>
+             <template v-if="column.key === 'action'">
+               <a @click="removePoint(record.id)" style="color: #cf1322">删除</a>
+             </template>
+           </template>
+         </a-table>
+       </div>
     </a-card>
   </div>
 </template>
@@ -170,10 +173,16 @@ const calculateEMA = (dayCount: number, data: number[]) => {
   const result: string[] = []
   const k = 2 / (dayCount + 1)
   for (let i = 0; i < data.length; i++) {
-    if (i === 0) {
-      result.push(data[i].toFixed(2))
+    if (i < dayCount - 1) {
+      result.push('-')
+    } else if (i === dayCount - 1) {
+      let sum = 0
+      for (let j = 0; j < dayCount; j++) {
+        sum += data[i - j]
+      }
+      result.push((sum / dayCount).toFixed(3))
     } else {
-      result.push((data[i] * k + Number(result[i - 1]) * (1 - k)).toFixed(2))
+      result.push((data[i] * k + Number(result[i - 1]) * (1 - k)).toFixed(3))
     }
   }
   return result
@@ -183,9 +192,46 @@ const calculateMACD = (data: any[]) => {
   const closes = data.map((d: any) => Number(d.closePrice))
   const ema12 = calculateEMA(12, closes)
   const ema26 = calculateEMA(26, closes)
-  const dif = ema12.map((v, i) => (Number(v) - Number(ema26[i])).toFixed(2))
-  const dea = calculateEMA(9, dif.map(Number))
-  const macd = dif.map((v, i) => ((Number(v) - Number(dea[i])) * 2).toFixed(2))
+  const dif: string[] = []
+  for (let i = 0; i < ema12.length; i++) {
+    if (ema12[i] === '-' || ema26[i] === '-') {
+      dif.push('-')
+    } else {
+      dif.push((Number(ema12[i]) - Number(ema26[i])).toFixed(3))
+    }
+  }
+  const dea: string[] = new Array(dif.length).fill('-')
+  const deaK = 2 / (9 + 1)
+  const validDifIndices: number[] = []
+  for (let i = 0; i < dif.length; i++) {
+    if (dif[i] !== '-') validDifIndices.push(i)
+  }
+  for (let j = 0; j < validDifIndices.length; j++) {
+    const i = validDifIndices[j]
+    if (j < 8) {
+      // 前8个有效DIF，DEA为'-'
+      continue
+    } else if (j === 8) {
+      // 第9个有效DIF，DEA = 前9个DIF的SMA
+      let sum = 0
+      for (let k = 0; k < 9; k++) {
+        sum += Number(dif[validDifIndices[k]])
+      }
+      dea[i] = (sum / 9).toFixed(3)
+    } else {
+      // 第10个起，DEA = EMA公式
+      const prevIdx = validDifIndices[j - 1]
+      dea[i] = (Number(dif[i]) * deaK + Number(dea[prevIdx]) * (1 - deaK)).toFixed(3)
+    }
+  }
+  const macd: string[] = []
+  for (let i = 0; i < dif.length; i++) {
+    if (dif[i] === '-' || dea[i] === '-') {
+      macd.push('-')
+    } else {
+      macd.push(((Number(dif[i]) - Number(dea[i])) * 2).toFixed(3))
+    }
+  }
   return { dif, dea, macd }
 }
 
@@ -393,7 +439,7 @@ const renderCharts = () => {
         const fullDate = date.substring(0, 4) + '-' + date.substring(4, 6) + '-' + date.substring(6, 8)
         let html = `<b>${fullDate}</b><br/>`
         for (const p of params) {
-          html += `${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(2)}<br/>`
+          html += `${p.marker} ${p.seriesName}: ${Number(p.value).toFixed(3)}<br/>`
         }
         return html
       }
@@ -491,19 +537,8 @@ const renderCharts = () => {
   })
 }
 
-const MAX_POINTS = 300
-
-const downsample = (data: any[], maxPoints: number) => {
-  if (data.length <= maxPoints) return data
-  const step = Math.ceil(data.length / maxPoints)
-  const result: any[] = []
-  for (let i = 0; i < data.length; i += step) {
-    result.push(data[i])
-  }
-  if (result[result.length - 1] !== data[data.length - 1]) {
-    result.push(data[data.length - 1])
-  }
-  return result
+const downsample = (data: any[]) => {
+  return data
 }
 
 const loadData = async () => {
@@ -520,11 +555,11 @@ const loadData = async () => {
       endDate = dateRange.value[1].format('YYYYMMDD')
     } else {
       endDate = dayjs().format('YYYYMMDD')
-      startDate = '20200101'
+      startDate = '20050713'
     }
     const res = await getStockDaily(selectedStockCode.value, startDate, endDate)
     if (res.code === 200) {
-      dailyData.value = downsample(res.data, MAX_POINTS)
+      dailyData.value = downsample(res.data)
       await nextTick()
       renderCharts()
     }

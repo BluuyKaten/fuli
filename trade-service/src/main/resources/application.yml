@@ -25,3 +25,7 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+tushare:
+  token: ${TUSHARE_TOKEN}
+  api-url: http://api.tushare.pro

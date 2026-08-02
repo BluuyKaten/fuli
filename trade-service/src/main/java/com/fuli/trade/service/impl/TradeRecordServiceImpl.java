@@ -250,4 +250,13 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         }
         return vo;
     }
+
+    @Override
+    @Transactional
+    public boolean clearAllByUserId(Long userId) {
+        LambdaQueryWrapper<TradeRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TradeRecord::getUserId, userId);
+        remove(wrapper);
+        return true;
+    }
 }

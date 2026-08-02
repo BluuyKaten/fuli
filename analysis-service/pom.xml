@@ -90,6 +90,13 @@
             <artifactId>common-api</artifactId>
         </dependency>
 
+        <!-- Trade-Service (实体类和Mapper) -->
+        <dependency>
+            <groupId>com.fuli</groupId>
+            <artifactId>trade-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Hutool -->
         <dependency>
             <groupId>cn.hutool</groupId>

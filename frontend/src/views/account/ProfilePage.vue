@@ -45,19 +45,41 @@
                   :value-style="{ color: totalProfitLoss >= 0 ? '#cf1322' : '#3f8600' }" />
               </a-col>
             </a-row>
+            <a-divider />
+            <a-button type="primary" danger @click="showResetModal">
+              <template #icon><ReloadOutlined /></template>
+              重置资金
+            </a-button>
           </a-card>
         </a-col>
       </a-row>
     </a-card>
+
+    <a-modal v-model:open="resetModalOpen" title="重置资金" :confirm-loading="resetLoading" @ok="handleReset" @cancel="resetModalOpen = false">
+      <a-alert
+        type="warning"
+        show-icon
+        description="重置资金将清空所有交易记录和持仓，恢复为初始状态。此操作不可撤销！"
+        style="margin-bottom: 16px"
+      />
+      <a-form layout="vertical">
+        <a-form-item label="新的初始资金">
+          <a-input-number v-model:value="newInitialCash" :min="10000" :step="10000" style="width: 100%" prefix="¥" :precision="2" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
+import { ReloadOutlined } from '@ant-design/icons-vue'
 import { getProfile, updateProfile } from '@/api/auth'
+import { resetCash, clearAllTrades } from '@/api/account'
 
 const profile = reactive({
+  id: 0,
   username: '',
   nickname: '',
   email: '',
@@ -69,6 +91,10 @@ const profile = reactive({
 const loading = ref(false)
 const totalInvestment = ref(0)
 const totalProfitLoss = ref(0)
+
+const resetModalOpen = ref(false)
+const resetLoading = ref(false)
+const newInitialCash = ref(200000)
 
 const loadProfile = async () => {
   try {
@@ -94,6 +120,42 @@ const handleUpdate = async () => {
     }
   } finally {
     loading.value = false
+  }
+}
+
+const showResetModal = () => {
+  Modal.confirm({
+    title: '确认重置',
+    content: '确定要重置资金吗？这将清空所有交易记录和持仓！',
+    okText: '确认重置',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk() {
+      resetModalOpen.value = true
+    }
+  })
+}
+
+const handleReset = async () => {
+  if (newInitialCash.value < 10000) {
+    message.warning('初始资金不能少于 10,000')
+    return
+  }
+  if (!profile.id) {
+    message.error('用户信息加载失败')
+    return
+  }
+  resetLoading.value = true
+  try {
+    await clearAllTrades(profile.id)
+    await resetCash(profile.id, newInitialCash.value)
+    message.success('资金重置成功')
+    resetModalOpen.value = false
+    await loadProfile()
+  } catch (error: any) {
+    message.error(error.message || '重置失败')
+  } finally {
+    resetLoading.value = false
   }
 }
 

@@ -8,3 +8,6 @@ export const getMonthlyProfit = (params?: { startDate?: string; endDate?: string
 
 export const getAssetCurve = (params?: { startDate?: string; endDate?: string }) =>
   request.get<any, { code: number; data: { dates: string[]; assets: number[] } }>('/analysis/asset-curve', { params })
+
+export const getDashboardData = () =>
+  request.get<any, { code: number; data: any }>('/analysis/dashboard')

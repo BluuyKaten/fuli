@@ -33,6 +33,9 @@ public class GatewayRouteConfig {
                 .route("stock-service", r -> r.path("/api/stock/**")
                         .filters(f -> f.stripPrefix(1))
                         .uri("lb://trade-service"))
+                .route("data-service", r -> r.path("/api/data/**")
+                        .filters(f -> f.stripPrefix(1))
+                        .uri("lb://data-service"))
                 .build();
     }
 }

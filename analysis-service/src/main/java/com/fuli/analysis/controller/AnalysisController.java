@@ -4,6 +4,7 @@ import com.fuli.common.api.Result;
 import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.analysis.service.AnalysisService;
+import com.fuli.analysis.service.DashboardService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,10 +20,12 @@ import java.util.Map;
 public class AnalysisController {
 
     private final AnalysisService analysisService;
+    private final DashboardService dashboardService;
     private final HttpServletRequest request;
 
-    public AnalysisController(AnalysisService analysisService, HttpServletRequest request) {
+    public AnalysisController(AnalysisService analysisService, DashboardService dashboardService, HttpServletRequest request) {
         this.analysisService = analysisService;
+        this.dashboardService = dashboardService;
         this.request = request;
     }
 
@@ -56,6 +59,13 @@ public class AnalysisController {
                                                    @RequestParam(required = false) LocalDate endDate) {
         Long userId = getCurrentUserId();
         Map<String, Object> result = analysisService.getAssetCurve(userId, startDate, endDate);
+        return Result.success(result);
+    }
+
+    @GetMapping("/dashboard")
+    public Result<Map<String, Object>> dashboard() {
+        Long userId = getCurrentUserId();
+        Map<String, Object> result = dashboardService.getDashboardData(userId);
         return Result.success(result);
     }
 }
