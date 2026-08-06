@@ -73,7 +73,8 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { message, Modal } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
+import { Modal } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { getProfile, updateProfile } from '@/api/auth'
 import { resetCash, clearAllTrades } from '@/api/account'
@@ -103,7 +104,7 @@ const loadProfile = async () => {
       Object.assign(profile, res.data)
     }
   } catch {
-    message.error('加载账户信息失败')
+    ElMessage.error('加载账户信息失败')
   }
 }
 
@@ -116,7 +117,7 @@ const handleUpdate = async () => {
       phone: profile.phone
     })
     if (res.code === 200) {
-      message.success('更新成功')
+      ElMessage.success('更新成功')
     }
   } finally {
     loading.value = false
@@ -138,22 +139,22 @@ const showResetModal = () => {
 
 const handleReset = async () => {
   if (newInitialCash.value < 10000) {
-    message.warning('初始资金不能少于 10,000')
+    ElMessage.warning('初始资金不能少于 10,000')
     return
   }
   if (!profile.id) {
-    message.error('用户信息加载失败')
+    ElMessage.error('用户信息加载失败')
     return
   }
   resetLoading.value = true
   try {
     await clearAllTrades(profile.id)
     await resetCash(profile.id, newInitialCash.value)
-    message.success('资金重置成功')
+    ElMessage.success('资金重置成功')
     resetModalOpen.value = false
     await loadProfile()
   } catch (error: any) {
-    message.error(error.message || '重置失败')
+    ElMessage.error(error.message || '重置失败')
   } finally {
     resetLoading.value = false
   }

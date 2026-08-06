@@ -31,3 +31,21 @@ CREATE TABLE `sys_user` (
 -- 初始化管理员账号（密码: admin123，BCrypt加密，初始现金20万）
 INSERT INTO `sys_user` (`username`, `password`, `nickname`, `email`, `cash`, `status`) VALUES
 ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDa', '管理员', 'admin@fuli.com', 200000.00, 1);
+
+-- 幂等消息表（防止 Feign 重试导致重复扣款/入账）
+-- 状态：0-PROCESSING(处理中) 1-SUCCESS 2-FAILED
+DROP TABLE IF EXISTS `idempotent_message`;
+CREATE TABLE `idempotent_message` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `msg_id` VARCHAR(64) NOT NULL COMMENT '消息唯一 ID（与 trade_db.local_message.msg_id 一致）',
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户 ID',
+    `amount` DECIMAL(16, 2) NOT NULL COMMENT '变动金额',
+    `cash_direction` TINYINT NOT NULL COMMENT '1-扣款 2-入账',
+    `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0-PROCESSING 1-SUCCESS 2-FAILED',
+    `error_msg` VARCHAR(512) DEFAULT NULL COMMENT '失败原因',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_msg_id` (`msg_id`),
+    KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='幂等消息表（防止重复资金变动）';

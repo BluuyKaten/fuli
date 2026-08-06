@@ -44,7 +44,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
 import dayjs, { type Dayjs } from 'dayjs'
 import { createTrade, type TradeRecord } from '@/api/trade'
 
@@ -95,7 +95,7 @@ const onSubmit = async () => {
   }
   const res = await createTrade(data)
   if (res.code === 200) {
-    message.success('保存成功')
+    ElMessage.success('保存成功')
     goBack()
   }
 }

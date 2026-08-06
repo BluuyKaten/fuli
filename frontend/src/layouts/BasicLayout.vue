@@ -55,7 +55,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
 import { LockOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { changePassword } from '@/api/auth'
@@ -83,21 +83,21 @@ const handleLogout = () => {
 
 const handleChangePassword = async () => {
   if (!passwordForm.oldPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-    message.warning('请填写完整')
+    ElMessage.warning('请填写完整')
     return
   }
   if (passwordForm.newPassword.length < 6) {
-    message.warning('新密码至少6位')
+    ElMessage.warning('新密码至少6位')
     return
   }
   if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-    message.warning('两次输入的新密码不一致')
+    ElMessage.warning('两次输入的新密码不一致')
     return
   }
   passwordLoading.value = true
   try {
     await changePassword(passwordForm.oldPassword, passwordForm.newPassword)
-    message.success('密码修改成功，请重新登录')
+    ElMessage.success('密码修改成功，请重新登录')
     showPasswordModal.value = false
     passwordForm.oldPassword = ''
     passwordForm.newPassword = ''
@@ -107,7 +107,7 @@ const handleChangePassword = async () => {
       router.push('/login')
     }, 1000)
   } catch (error: any) {
-    message.error(error.message || '密码修改失败')
+    ElMessage.error(error.message || '密码修改失败')
   } finally {
     passwordLoading.value = false
   }

@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -140,7 +142,49 @@ public class TushareController {
         return Result.success(progress);
     }
 
-    @GetMapping("/sync/status")
+    /**
+     * 查询最近一次同步任务的失败日期列表
+     *
+     * @return 失败的日期及原因列表
+     */
+    @GetMapping("/sync/last-failures")
+    public Result<java.util.List<SyncResult.FailedDate>> getLastFailures() {
+        SyncResult last = tushareSyncService.getLastSyncResult();
+        if (last == null || last.getFailedDates() == null || last.getFailedDates().isEmpty()) {
+            return Result.success(java.util.Collections.emptyList());
+        }
+        return Result.success(last.getFailedDates());
+    }
+
+    /**
+     * 重试同步指定的交易日(通常是上次失败的日期)
+     *
+     * @param params 请求参数:
+     *               - tradeDates: 交易日列表(yyyyMMdd)
+     * @return 重试结果(含成功/失败明细)
+     */
+    @PostMapping("/sync/retry-failures")
+    public Result<SyncResult> retryFailures(@RequestBody Map<String, Object> params) {
+        try {
+            Object datesObj = params.get("tradeDates");
+            if (!(datesObj instanceof List<?> datesList) || datesList.isEmpty()) {
+                return Result.error("参数错误: tradeDates 不能为空");
+            }
+            java.util.List<String> tradeDates = new java.util.ArrayList<>();
+            for (Object o : datesList) {
+                if (o == null) return Result.error("参数错误: tradeDates 包含空值");
+                tradeDates.add(o.toString());
+            }
+            SyncResult result = tushareSyncService.retryFailedDates(tradeDates);
+            if (result.isAllSuccess()) {
+                return Result.success("重试全部成功", result);
+            }
+            return Result.success("重试部分失败", result);
+        } catch (Exception e) {
+            log.error("重试同步失败", e);
+            return Result.error("重试失败: " + e.getMessage());
+        }
+    }
     public Result<SyncStatus> syncStatus(@RequestParam String tsCode) {
         try {
             SyncStatus status = tushareSyncService.getSyncStatus(tsCode);

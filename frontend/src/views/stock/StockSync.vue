@@ -139,7 +139,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
 import { CloudUploadOutlined } from '@ant-design/icons-vue'
 import { syncStockBasic, syncDailyByDate, syncDailyByRange, syncAllIncremental, getSyncStatus } from '@/api/stock'
 
@@ -175,10 +175,10 @@ const handleAutoSync = async () => {
       const res = await syncDailyByRange(tsCode.value, rangeStart, rangeEnd)
       if (res.code === 200) {
         autoResult.value = { status: 'success', count: res.data }
-        message.success(`同步成功，共 ${res.data} 条`)
+        ElMessage.success(`同步成功，共 ${res.data} 条`)
       } else {
         autoResult.value = { status: 'error', message: '同步失败' }
-        message.error('同步失败')
+        ElMessage.error('同步失败')
       }
     } else {
       const interval = setInterval(() => {
@@ -191,15 +191,15 @@ const handleAutoSync = async () => {
       syncProgress.value = 100
       if (res.code === 200) {
         autoResult.value = { status: 'success', count: res.data }
-        message.success(`同步成功，共 ${res.data} 条`)
+        ElMessage.success(`同步成功，共 ${res.data} 条`)
       } else {
         autoResult.value = { status: 'error', message: '同步失败' }
-        message.error('同步失败')
+        ElMessage.error('同步失败')
       }
     }
   } catch (error: any) {
     autoResult.value = { status: 'error', message: error.message || '请求失败' }
-    message.error(error.message || '请求失败')
+    ElMessage.error(error.message || '请求失败')
   } finally {
     syncingAuto.value = false
   }
@@ -212,14 +212,14 @@ const handleSyncBasic = async () => {
     const res = await syncStockBasic()
     if (res.code === 200) {
       basicResult.value = { status: 'success', count: res.data }
-      message.success(`同步成功，共 ${res.data} 条`)
+      ElMessage.success(`同步成功，共 ${res.data} 条`)
     } else {
       basicResult.value = { status: 'error', message: '同步失败' }
-      message.error('同步失败')
+      ElMessage.error('同步失败')
     }
   } catch (error: any) {
     basicResult.value = { status: 'error', message: error.message || '请求失败' }
-    message.error(error.message || '请求失败')
+    ElMessage.error(error.message || '请求失败')
   } finally {
     syncingBasic.value = false
   }
@@ -227,7 +227,7 @@ const handleSyncBasic = async () => {
 
 const handleSyncDailyByDate = async () => {
   if (!dailyDate.value) {
-    message.warning('请选择交易日期')
+    ElMessage.warning('请选择交易日期')
     return
   }
   syncingDaily.value = true
@@ -236,14 +236,14 @@ const handleSyncDailyByDate = async () => {
     const res = await syncDailyByDate(dailyDate.value)
     if (res.code === 200) {
       dailyDateResult.value = { status: 'success', count: res.data }
-      message.success(`同步成功，共 ${res.data} 条`)
+      ElMessage.success(`同步成功，共 ${res.data} 条`)
     } else {
       dailyDateResult.value = { status: 'error', message: '同步失败' }
-      message.error('同步失败')
+      ElMessage.error('同步失败')
     }
   } catch (error: any) {
     dailyDateResult.value = { status: 'error', message: error.message || '请求失败' }
-    message.error(error.message || '请求失败')
+    ElMessage.error(error.message || '请求失败')
   } finally {
     syncingDaily.value = false
   }
@@ -251,7 +251,7 @@ const handleSyncDailyByDate = async () => {
 
 const handleCheckStatus = async () => {
   if (!tsCode.value) {
-    message.warning('请输入股票代码')
+    ElMessage.warning('请输入股票代码')
     return
   }
   checkingStatus.value = true
@@ -260,10 +260,10 @@ const handleCheckStatus = async () => {
     if (res.code === 200) {
       syncStatus.value = res.data
     } else {
-      message.error('获取状态失败')
+      ElMessage.error('获取状态失败')
     }
   } catch (error: any) {
-    message.error(error.message || '请求失败')
+    ElMessage.error(error.message || '请求失败')
   } finally {
     checkingStatus.value = false
   }

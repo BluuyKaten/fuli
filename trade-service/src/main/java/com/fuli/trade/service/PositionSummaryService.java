@@ -21,10 +21,11 @@ public interface PositionSummaryService {
     int checkHolding(Long userId, String stockCode, int sellQuantity);
 
     /**
-     * 卖出后减少持仓
-     * @return 卖出成本价（加权平均）
+     * 卖出后减少持仓(原子操作,并发安全)
+     * @return 卖出成本价(加权平均)
+     * @throws com.fuli.common.api.exception.BusinessException 持仓不足
      */
-    BigDecimal decreasePosition(Long userId, String stockCode, int quantity);
+    BigDecimal decreasePositionAtomic(Long userId, String stockCode, int quantity);
 
     /**
      * 查询当前持仓数量

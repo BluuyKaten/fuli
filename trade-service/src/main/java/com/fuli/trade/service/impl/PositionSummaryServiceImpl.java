@@ -58,21 +58,19 @@ public class PositionSummaryServiceImpl implements PositionSummaryService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
-    public BigDecimal decreasePosition(Long userId, String stockCode, int quantity) {
+    public BigDecimal decreasePositionAtomic(Long userId, String stockCode, int quantity) {
+        // 1. 先取当前均价(用于返回给调用方计算盈亏)
         PositionSummary position = getPosition(userId, stockCode);
         if (position == null) {
             throw new BusinessException(400, "持仓不存在");
         }
         BigDecimal avgCost = position.getAvgCost();
-        int newQuantity = position.getTotalQuantity() - quantity;
-        if (newQuantity < 0) {
-            throw new BusinessException(400, "持仓不足");
+        // 2. 原子扣减,受影响行=0 表示持仓不足
+        int affected = positionSummaryMapper.decreaseQuantity(userId, stockCode, quantity);
+        if (affected <= 0) {
+            throw new BusinessException(400, "持仓不足,扣减失败");
         }
-        position.setTotalQuantity(newQuantity);
-        positionSummaryMapper.updateById(position);
-
-        log.info("持仓减少: userId={}, stockCode={}, {}股, 剩余={}", userId, stockCode, quantity, newQuantity);
+        log.info("持仓原子减少: userId={}, stockCode={}, {}股", userId, stockCode, quantity);
         return avgCost;
     }
 

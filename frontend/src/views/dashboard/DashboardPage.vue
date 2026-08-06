@@ -110,6 +110,10 @@ const dashboardData = ref<DashboardData>({
   floatingProfitLoss: 0,
   totalMarketValue: 0,
   cashBalance: 0,
+  cash: 0,
+  totalCost: 0,
+  totalProfitLoss: 0,
+  totalProfitLossPercent: 0,
   positions: []
 })
 const monthlyData = ref<MonthlyProfit[]>([])

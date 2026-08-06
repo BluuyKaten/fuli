@@ -39,6 +39,9 @@ public class TushareSyncServiceImpl implements TushareSyncService {
     private final StockDailyDataMapper stockDailyDataMapper;
     private final SyncProgressManager progressManager;
 
+    /** 最近一次同步结果(用于失败重试) */
+    private volatile SyncResult lastSyncResult;
+
     public TushareSyncServiceImpl(TushareClient tushareClient,
                                   StockInfoMapper stockInfoMapper,
                                   StockDailyDataMapper stockDailyDataMapper,
@@ -397,6 +400,49 @@ public class TushareSyncServiceImpl implements TushareSyncService {
             }
             progressManager.failTask(taskId, result.getSummary(), errorDetail.toString());
         }
+
+        // 记录最近一次同步结果,供失败重试
+        lastSyncResult = result;
+    }
+
+    @Override
+    public SyncResult retryFailedDates(List<String> tradeDates) {
+        SyncResult retryResult = new SyncResult();
+        if (tradeDates == null || tradeDates.isEmpty()) {
+            return retryResult;
+        }
+        retryResult.setStartDate(tradeDates.get(0));
+        retryResult.setEndDate(tradeDates.get(tradeDates.size() - 1));
+        retryResult.setTotalDays(tradeDates.size());
+
+        long startTime = System.currentTimeMillis();
+        int successDays = 0;
+        AtomicInteger totalCount = new AtomicInteger(0);
+
+        for (String tradeDate : tradeDates) {
+            try {
+                int count = syncDailyDataByTradeDateInternal(tradeDate);
+                successDays++;
+                totalCount.addAndGet(count);
+            } catch (Exception e) {
+                retryResult.addFailedDate(tradeDate, e.getMessage());
+                log.warn("重试同步失败: {} -> {}", tradeDate, e.getMessage());
+            }
+        }
+
+        retryResult.setSuccessDays(successDays);
+        retryResult.setTotalCount(totalCount.get());
+        retryResult.setElapsedMs(System.currentTimeMillis() - startTime);
+
+        // 刷新最近一次结果
+        lastSyncResult = retryResult;
+        log.info("重试同步完成: {}", retryResult.getSummary());
+        return retryResult;
+    }
+
+    @Override
+    public SyncResult getLastSyncResult() {
+        return lastSyncResult;
     }
 
     /**

@@ -29,3 +29,7 @@ mybatis-plus:
 # 内部服务地址（Feign 调用用）
 fuli:
   internal-key: ${INTERNAL_KEY:fuli-stock-internal-2025-secure-key}
+  # 资金校验失败时的处理策略：
+  #   reject  - 默认,资金查询失败时拒绝交易(防透支,推荐)
+  #   allow   - 资金查询失败时允许交易(仅用于 auth-service 完全不可用的降级场景)
+  cash-validation-fail-strategy: ${CASH_VALIDATION_FAIL_STRATEGY:reject}

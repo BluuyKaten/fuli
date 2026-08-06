@@ -56,7 +56,7 @@ public class TradeRecordController {
 
     @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Long id) {
-        boolean result = tradeRecordService.deleteTrade(id);
+        boolean result = tradeRecordService.deleteTradeWithRollback(id);
         return Result.success(result ? "删除成功" : "删除失败", result);
     }
 

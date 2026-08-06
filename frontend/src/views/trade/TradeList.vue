@@ -49,7 +49,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { getTradePage, deleteTrade, type TradeRecord, type TradeQueryParams } from '@/api/trade'
 
@@ -127,7 +127,7 @@ const handleEdit = (record: TradeRecord) => {
 const handleDelete = async (id: number) => {
   const res = await deleteTrade(id)
   if (res.code === 200) {
-    message.success('删除成功')
+    ElMessage.success('删除成功')
     loadData()
   }
 }

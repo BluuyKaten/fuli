@@ -22,13 +22,19 @@ public interface AuthFeignClient {
 
     /**
      * 扣除现金（买入时调用）
+     * @param msgId 消息唯一 ID,用于幂等防重;传 null 则不走幂等
      */
     @PutMapping("/auth/internal/deductCash")
-    Result<Boolean> deductCash(@RequestParam("userId") Long userId, @RequestParam("amount") BigDecimal amount);
+    Result<Boolean> deductCash(@RequestParam("userId") Long userId,
+                               @RequestParam("amount") BigDecimal amount,
+                               @RequestParam(value = "msgId", required = false) String msgId);
 
     /**
      * 增加现金（卖出时调用）
+     * @param msgId 消息唯一 ID,用于幂等防重;传 null 则不走幂等
      */
     @PutMapping("/auth/internal/addCash")
-    Result<Boolean> addCash(@RequestParam("userId") Long userId, @RequestParam("amount") BigDecimal amount);
+    Result<Boolean> addCash(@RequestParam("userId") Long userId,
+                             @RequestParam("amount") BigDecimal amount,
+                             @RequestParam(value = "msgId", required = false) String msgId);
 }

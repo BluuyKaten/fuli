@@ -97,12 +97,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
-import { message } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
-import { searchStocks, getStockDaily, getHoldingQuantity, getStockLatestPrice, getAvailableQuantity } from '@/api/stock'
+import { searchStocks, getStockDaily, getStockLatestPrice, getAvailableQuantity } from '@/api/stock'
 import { createTrade } from '@/api/trade'
 import { getProfile } from '@/api/auth'
 import type { StockInfo, StockDailyData } from '@/types'
+import { BIZ_CODE_MESSAGE } from '@/utils/bizError'
+
+/** 根据后端错误码给出针对性提示 */
+const showTradeError = (err: any) => {
+  const code = err?.code
+  if (code && BIZ_CODE_MESSAGE[code]) {
+    ElMessage.error(BIZ_CODE_MESSAGE[code] + (err?.message ? `: ${err.message}` : ''))
+  } else {
+    ElMessage.error(err?.message || '保存失败')
+  }
+}
 
 const searchKeyword = ref('')
 const searchOptions = ref<(StockInfo & { value: string; label: string })[]>([])
@@ -196,27 +207,6 @@ const handleSelectStock = async (value: string) => {
   // 查询当前持仓、可卖数量和最新价格
   await loadAvailableQuantity(value)
   await loadCurrentPrice(value)
-}
-
-const loadHoldingQuantity = async (stockCode: string) => {
-  try {
-    let userId = Number(localStorage.getItem('userId') || '0')
-    // 如果 localStorage 中没有 userId，从 profile 接口获取
-    if (userId <= 0) {
-      const profileRes = await getProfile()
-      if (profileRes.code === 200 && profileRes.data && profileRes.data.id) {
-        userId = profileRes.data.id
-        localStorage.setItem('userId', String(userId))
-      }
-    }
-    if (userId <= 0) return
-    const res = await getHoldingQuantity(userId, stockCode)
-    if (res.code === 200 && res.data) {
-      holdingQuantity.value = res.data.holdingQuantity || 0
-    }
-  } catch {
-    holdingQuantity.value = 0
-  }
 }
 
 // 加载可卖数量（考虑A股T+1规则）
@@ -656,7 +646,7 @@ const downsample = (data: any[]) => {
 
 const loadData = async () => {
   if (!selectedStockCode.value) {
-    message.warning('请先选择股票')
+    ElMessage.warning('请先选择股票')
     return
   }
   loading.value = true
@@ -694,7 +684,7 @@ const saveTradePoints = async () => {
   if (sellPoints.length > 0) {
     const totalSellQuantity = sellPoints.reduce((sum, p) => sum + p.quantity, 0)
     if (totalSellQuantity > availableQuantity.value) {
-      message.error(`卖出数量超过可卖范围！本次卖出 ${totalSellQuantity} 股，当前可卖 ${availableQuantity.value} 股`)
+      ElMessage.error(`卖出数量超过可卖范围！本次卖出 ${totalSellQuantity} 股，当前可卖 ${availableQuantity.value} 股`)
       return
     }
   }
@@ -706,14 +696,14 @@ const saveTradePoints = async () => {
     for (const point of buyPoints) {
       const maxQty = Math.floor(userCash.value / point.price / 100) * 100
       if (point.quantity > maxQty) {
-        message.error(`${point.date} 买入数量超过可买范围！价格 ¥${point.price}，买入 ${point.quantity} 股，当前最多可买 ${maxQty.toLocaleString()} 股`)
+        ElMessage.error(`${point.date} 买入数量超过可买范围！价格 ¥${point.price}，买入 ${point.quantity} 股，当前最多可买 ${maxQty.toLocaleString()} 股`)
         return
       }
     }
     // 再校验买入总金额是否超过可用资金
     const totalBuyAmount = buyPoints.reduce((sum, p) => sum + p.price * p.quantity, 0)
     if (totalBuyAmount > userCash.value) {
-      message.error(`买入总金额超过可用资金！买入总额 ¥${totalBuyAmount.toLocaleString()}，当前可用现金 ¥${userCash.value.toLocaleString()}`)
+      ElMessage.error(`买入总金额超过可用资金！买入总额 ¥${totalBuyAmount.toLocaleString()}，当前可用现金 ¥${userCash.value.toLocaleString()}`)
       return
     }
   }
@@ -729,7 +719,7 @@ const saveTradePoints = async () => {
         tradeDate: point.date.substring(0, 4) + '-' + point.date.substring(4, 6) + '-' + point.date.substring(6, 8)
       })
     }
-    message.success(`成功保存 ${selectedPoints.value.length} 条交易记录`)
+    ElMessage.success(`成功保存 ${selectedPoints.value.length} 条交易记录`)
     selectedPoints.value = []
     updateMarkPoints()
     loadProfile()
@@ -738,7 +728,7 @@ const saveTradePoints = async () => {
       await loadAvailableQuantity(selectedStockCode.value)
     }
   } catch (error: any) {
-    message.error(error.message || '保存失败')
+    showTradeError(error)
   }
 }
 

@@ -40,7 +40,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { ElMessage } from 'element-plus'
 import { UserOutlined, LockOutlined } from '@ant-design/icons-vue'
 import { loginApi, registerApi } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
@@ -76,7 +76,7 @@ const onFinish = async (values: { username: string; password: string }) => {
     if (isRegister.value) {
       const res = await registerApi({ username: values.username, password: values.password })
       if (res.code === 200) {
-        message.success('注册成功，请登录')
+        ElMessage.success('注册成功，请登录')
         isRegister.value = false
         formState.password = ''
         formState.confirmPassword = ''
@@ -84,8 +84,8 @@ const onFinish = async (values: { username: string; password: string }) => {
     } else {
       const res = await loginApi(values)
       if (res.code === 200) {
-        userStore.setToken(res.data.token, res.data.username, res.data.nickname, res.data.userId, res.data.cash)
-        message.success('登录成功')
+        userStore.setToken(res.data.token, res.data.username, res.data.nickname ?? null, 0, res.data.cash)
+        ElMessage.success('登录成功')
         router.push('/dashboard')
       }
     }

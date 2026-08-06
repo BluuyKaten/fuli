@@ -18,12 +18,12 @@ public class CashChangeServiceImpl implements CashChangeService {
     }
 
     @Override
-    public void deductCash(Long userId, BigDecimal amount) {
-        authFeignClient.deductCash(userId, amount);
+    public void deductCash(Long userId, BigDecimal amount, String msgId) {
+        authFeignClient.deductCash(userId, amount, msgId);
     }
 
     @Override
-    public void addCash(Long userId, BigDecimal amount) {
-        authFeignClient.addCash(userId, amount);
+    public void addCash(Long userId, BigDecimal amount, String msgId) {
+        authFeignClient.addCash(userId, amount, msgId);
     }
 }

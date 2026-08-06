@@ -6,10 +6,10 @@ import org.springframework.context.ApplicationEvent;
 import java.math.BigDecimal;
 
 /**
- * 交易创建事件（用于异步处理资金变动）
+ * 交易删除事件（用于回滚持仓与资金）
  */
 @Getter
-public class TradeCreatedEvent extends ApplicationEvent {
+public class TradeDeletedEvent extends ApplicationEvent {
 
     private final Long tradeId;
     private final Long userId;
@@ -17,17 +17,11 @@ public class TradeCreatedEvent extends ApplicationEvent {
     private final String stockCode;
     private final String stockName;
     private final BigDecimal amount;
-    private final BigDecimal tradePrice;
     private final Integer tradeQuantity;
-    /** 消息唯一 ID,用于幂等防重 */
-    private final String msgId;
 
-    public TradeCreatedEvent(Object source, Long tradeId, Long userId, Integer tradeType,
+    public TradeDeletedEvent(Object source, Long tradeId, Long userId, Integer tradeType,
                              String stockCode, String stockName,
-                             BigDecimal amount,
-                             BigDecimal tradePrice,
-                             Integer tradeQuantity,
-                             String msgId) {
+                             BigDecimal amount, Integer tradeQuantity) {
         super(source);
         this.tradeId = tradeId;
         this.userId = userId;
@@ -35,8 +29,6 @@ public class TradeCreatedEvent extends ApplicationEvent {
         this.stockCode = stockCode;
         this.stockName = stockName;
         this.amount = amount;
-        this.tradePrice = tradePrice;
         this.tradeQuantity = tradeQuantity;
-        this.msgId = msgId;
     }
 }

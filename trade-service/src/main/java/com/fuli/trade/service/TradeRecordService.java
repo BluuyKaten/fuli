@@ -18,6 +18,17 @@ public interface TradeRecordService extends IService<TradeRecord> {
 
     boolean deleteTrade(Long id);
 
+    /**
+     * 删除交易并回滚持仓与资金（仅允许删除某股票最后一笔交易）
+     * @return true-删除成功；false-不是最后一笔或不存在
+     */
+    boolean deleteTradeWithRollback(Long id);
+
+    /**
+     * 判断某笔交易是否是该股票最后一笔
+     */
+    boolean isLastTrade(Long id);
+
     TradeVO getTradeById(Long id);
 
     List<TradeVO> listTrades(TradeQueryDTO queryDTO);

@@ -1,6 +1,8 @@
 package com.fuli.auth.controller;
 
+import com.fuli.auth.entity.IdempotentMessage;
 import com.fuli.auth.entity.User;
+import com.fuli.auth.service.IdempotentMessageService;
 import com.fuli.auth.service.UserService;
 import com.fuli.auth.util.JwtUtil;
 import com.fuli.common.api.Result;
@@ -31,12 +33,15 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final HttpServletRequest request;
+    private final IdempotentMessageService idempotentMessageService;
 
-    public AuthController(UserService userService, PasswordEncoder passwordEncoder, JwtUtil jwtUtil, HttpServletRequest request) {
+    public AuthController(UserService userService, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
+                          HttpServletRequest request, IdempotentMessageService idempotentMessageService) {
         this.userService = userService;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.request = request;
+        this.idempotentMessageService = idempotentMessageService;
     }
 
     private Long getCurrentUserId() {
@@ -134,28 +139,48 @@ public class AuthController {
     }
 
     @PutMapping("/internal/deductCash")
-    public Result<Boolean> deductCash(@RequestParam Long userId, @RequestParam BigDecimal amount) {
-        User user = userService.getById(userId);
-        if (user == null) {
-            return Result.error("用户不存在");
+    public Result<Boolean> deductCash(@RequestParam Long userId,
+                                      @RequestParam BigDecimal amount,
+                                      @RequestParam(value = "msgId", required = false) String msgId) {
+        try {
+            boolean success = idempotentMessageService.executeIdempotent(
+                    msgId, userId, amount, IdempotentMessage.DIRECTION_DEDUCT, () -> {
+                        User user = userService.getById(userId);
+                        if (user == null) {
+                            throw new RuntimeException("用户不存在");
+                        }
+                        if (user.getCash().compareTo(amount) < 0) {
+                            throw new RuntimeException("现金不足");
+                        }
+                        // 原子更新,避免并发覆盖
+                        boolean updated = userService.deductCash(userId, amount);
+                        if (!updated) {
+                            throw new RuntimeException("扣款失败(现金不足或并发冲突)");
+                        }
+                    });
+            return Result.success("扣款成功", success);
+        } catch (RuntimeException e) {
+            return Result.error(e.getMessage());
         }
-        if (user.getCash().compareTo(amount) < 0) {
-            return Result.error("现金不足");
-        }
-        user.setCash(user.getCash().subtract(amount));
-        userService.updateById(user);
-        return Result.success("扣款成功", true);
     }
 
     @PutMapping("/internal/addCash")
-    public Result<Boolean> addCash(@RequestParam Long userId, @RequestParam BigDecimal amount) {
-        User user = userService.getById(userId);
-        if (user == null) {
-            return Result.error("用户不存在");
+    public Result<Boolean> addCash(@RequestParam Long userId,
+                                    @RequestParam BigDecimal amount,
+                                    @RequestParam(value = "msgId", required = false) String msgId) {
+        try {
+            boolean success = idempotentMessageService.executeIdempotent(
+                    msgId, userId, amount, IdempotentMessage.DIRECTION_ADD, () -> {
+                        User user = userService.getById(userId);
+                        if (user == null) {
+                            throw new RuntimeException("用户不存在");
+                        }
+                        userService.addCash(userId, amount);
+                    });
+            return Result.success("入账成功", success);
+        } catch (RuntimeException e) {
+            return Result.error(e.getMessage());
         }
-        user.setCash(user.getCash().add(amount));
-        userService.updateById(user);
-        return Result.success("入账成功", true);
     }
 
     @GetMapping("/internal/userCash")

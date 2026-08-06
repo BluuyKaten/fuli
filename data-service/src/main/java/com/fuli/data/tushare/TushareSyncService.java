@@ -1,5 +1,7 @@
 package com.fuli.data.tushare;
 
+import java.util.List;
+
 public interface TushareSyncService {
 
     int syncStockBasic();
@@ -7,6 +9,18 @@ public interface TushareSyncService {
     int syncDailyData(String tsCode, String startDate, String endDate);
 
     int syncDailyDataByTradeDate(String tradeDate);
+
+    /**
+     * 批量重试同步指定的交易日
+     * @param tradeDates 交易日列表 yyyyMMdd
+     * @return 同步结果(含成功/失败明细)
+     */
+    SyncResult retryFailedDates(List<String> tradeDates);
+
+    /**
+     * 获取最近一次同步结果(用于失败重试);若无则返回 null
+     */
+    SyncResult getLastSyncResult();
 
     SyncStatus getSyncStatus(String tsCode);
 

@@ -5,15 +5,18 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
 import com.fuli.common.api.enums.TradeTypeEnum;
+import com.fuli.common.api.exception.BizCode;
 import com.fuli.common.api.exception.BusinessException;
 import com.fuli.common.api.feign.AuthFeignClient;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
+import com.fuli.trade.config.FuliProperties;
 import com.fuli.trade.entity.LocalMessage;
 import com.fuli.trade.entity.StockDailyData;
 import com.fuli.trade.entity.TradeRecord;
 import com.fuli.trade.event.TradeCreatedEvent;
+import com.fuli.trade.event.TradeDeletedEvent;
 import com.fuli.trade.mapper.StockDailyDataMapper;
 import com.fuli.trade.mapper.TradeRecordMapper;
 import com.fuli.trade.service.LocalMessageService;
@@ -44,17 +47,20 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     private final ApplicationEventPublisher eventPublisher;
     private final StockDailyDataMapper stockDailyDataMapper;
     private final AuthFeignClient authFeignClient;
+    private final FuliProperties fuliProperties;
 
     public TradeRecordServiceImpl(PositionSummaryService positionSummaryService,
                                   LocalMessageService localMessageService,
                                   ApplicationEventPublisher eventPublisher,
                                   StockDailyDataMapper stockDailyDataMapper,
-                                  AuthFeignClient authFeignClient) {
+                                  AuthFeignClient authFeignClient,
+                                  FuliProperties fuliProperties) {
         this.positionSummaryService = positionSummaryService;
         this.localMessageService = localMessageService;
         this.eventPublisher = eventPublisher;
         this.stockDailyDataMapper = stockDailyDataMapper;
         this.authFeignClient = authFeignClient;
+        this.fuliProperties = fuliProperties;
     }
 
     @Override
@@ -86,10 +92,11 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
             // 3. 卖出：先校验持仓是否足够，并获取可卖数量
             int holdingQuantity = positionSummaryService.getHoldingQuantity(tradeDTO.getUserId(), tradeDTO.getStockCode());
             if (holdingQuantity <= 0) {
-                throw new BusinessException(400, "当前无持仓，无法卖出");
+                throw new BusinessException(BizCode.POSITION_INSUFFICIENT, "当前无持仓，无法卖出");
             }
             if (tradeDTO.getTradeQuantity() > holdingQuantity) {
-                throw new BusinessException(400, "卖出数量超过持仓，当前可卖 " + holdingQuantity + " 股");
+                throw new BusinessException(BizCode.POSITION_INSUFFICIENT,
+                        "卖出数量超过持仓，当前可卖 " + holdingQuantity + " 股");
             }
 
             // 4. 校验卖出价格是否在涨跌停范围内
@@ -138,7 +145,7 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
 
         // 9. 更新持仓汇总
         if (TradeTypeEnum.SELL.getCode().equals(tradeDTO.getTradeType())) {
-            positionSummaryService.decreasePosition(tradeDTO.getUserId(), tradeDTO.getStockCode(), tradeDTO.getTradeQuantity());
+            positionSummaryService.decreasePositionAtomic(tradeDTO.getUserId(), tradeDTO.getStockCode(), tradeDTO.getTradeQuantity());
         } else {
             positionSummaryService.increasePosition(tradeDTO.getUserId(), tradeDTO.getStockCode(),
                     tradeDTO.getStockName(), tradeDTO.getTradeQuantity(), tradeDTO.getTradePrice());
@@ -146,16 +153,21 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
 
         // 10. 写入本地消息表（用于跨服务事务最终一致性）
         String topic = TradeTypeEnum.SELL.getCode().equals(tradeDTO.getTradeType()) ? "TRADE_SELL" : "TRADE_BUY";
-        String payload = String.format("{\"userId\":%d,\"amount\":%s}", tradeDTO.getUserId(), cashChangeAmount.toPlainString());
-        LocalMessage message = localMessageService.createPendingMessage(
-                UUID.randomUUID().toString(), topic, payload);
-        record.setRemark((record.getRemark() != null ? record.getRemark() + " " : "") + "[msgId=" + message.getMsgId() + "]");
+        String msgId = UUID.randomUUID().toString();
+        String payload = String.format("{\"userId\":%d,\"amount\":%s,\"msgId\":\"%s\"}",
+                tradeDTO.getUserId(), cashChangeAmount.toPlainString(), msgId);
+        LocalMessage message = localMessageService.createPendingMessage(msgId, topic, payload);
+        if (tradeDTO.getRemark() != null && !tradeDTO.getRemark().isEmpty()) {
+            record.setRemark(tradeDTO.getRemark() + " [msgId=" + msgId + "]");
+        } else {
+            record.setRemark("[msgId=" + msgId + "]");
+        }
 
-        // 11. 发布事件（事务提交后异步处理资金变动）
+        // 11. 发布事件（事务提交后异步处理资金变动,携带 msgId 走幂等）
         eventPublisher.publishEvent(new TradeCreatedEvent(
                 this, record.getId(), tradeDTO.getUserId(), tradeDTO.getTradeType(),
                 tradeDTO.getStockCode(), tradeDTO.getStockName(),
-                cashChangeAmount, tradeDTO.getTradePrice(), tradeDTO.getTradeQuantity()));
+                cashChangeAmount, tradeDTO.getTradePrice(), tradeDTO.getTradeQuantity(), msgId));
 
         return record.getId();
     }
@@ -167,7 +179,11 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         if (existing == null) {
             return false;
         }
-        BeanUtils.copyProperties(tradeDTO, existing, "id", "createTime", "updateTime");
+        // 编辑交易不允许修改数量/类型/价格/日期,避免破坏持仓与资金一致性
+        // 仅允许修改备注。如需修改核心字段,请删除后重新录入。
+        if (tradeDTO.getRemark() != null) {
+            existing.setRemark(tradeDTO.getRemark());
+        }
         return updateById(existing);
     }
 
@@ -175,6 +191,57 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteTrade(Long id) {
         return removeById(id);
+    }
+
+    @Override
+    public boolean isLastTrade(Long id) {
+        TradeRecord trade = getById(id);
+        if (trade == null) {
+            return false;
+        }
+        // 查找该用户该股票在 trade 之后是否还有交易(按 trade_date 降,id 降,取最大一笔与当前比较)
+        LambdaQueryWrapper<TradeRecord> latestWrapper = new LambdaQueryWrapper<>();
+        latestWrapper.eq(TradeRecord::getUserId, trade.getUserId())
+                .eq(TradeRecord::getStockCode, trade.getStockCode())
+                .orderByDesc(TradeRecord::getTradeDate)
+                .orderByDesc(TradeRecord::getId)
+                .last("LIMIT 1");
+        TradeRecord latest = getOne(latestWrapper);
+        return latest != null && latest.getId() != null && latest.getId().equals(trade.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean deleteTradeWithRollback(Long id) {
+        TradeRecord trade = getById(id);
+        if (trade == null) {
+            return false;
+        }
+        if (!isLastTrade(id)) {
+            throw new BusinessException(BizCode.NOT_LAST_TRADE, "仅允许删除某股票的最后一笔交易,请先删除后续交易");
+        }
+
+        // 1. 回滚持仓
+        if (TradeTypeEnum.BUY.getCode().equals(trade.getTradeType())) {
+            // 买入 → 原子减仓
+            positionSummaryService.decreasePositionAtomic(trade.getUserId(), trade.getStockCode(), trade.getTradeQuantity());
+        } else if (TradeTypeEnum.SELL.getCode().equals(trade.getTradeType())) {
+            // 卖出 → 加仓(按卖出价加回)
+            positionSummaryService.increasePosition(trade.getUserId(), trade.getStockCode(),
+                    trade.getStockName(), trade.getTradeQuantity(), trade.getTradePrice());
+        }
+
+        // 2. 反向资金事件(事务提交后异步扣/入)
+        eventPublisher.publishEvent(new TradeDeletedEvent(
+                this, trade.getId(), trade.getUserId(), trade.getTradeType(),
+                trade.getStockCode(), trade.getStockName(),
+                trade.getTotalCost(), trade.getTradeQuantity()));
+
+        // 3. 软删除交易记录
+        boolean removed = removeById(id);
+        log.info("删除交易并回滚: tradeId={}, userId={}, stockCode={}, type={}, qty={}",
+                id, trade.getUserId(), trade.getStockCode(), trade.getTradeType(), trade.getTradeQuantity());
+        return removed;
     }
 
     @Override
@@ -325,57 +392,68 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
 
     /**
      * 校验买入资金是否充足
-     * 规则：买入总成本（成交金额 + 手续费 + 印花税）不能超过用户可用现金
+     * 规则：买入总成本(成交金额 + 手续费 + 印花税)不能超过用户可用现金
+     * 资金查询失败时,根据 fuli.cash-validation-fail-strategy 决定拒绝或放行
      */
     private void validateBuyCash(Long userId, BigDecimal cashChangeAmount) {
         try {
             Result<BigDecimal> result = authFeignClient.getUserCash(userId);
             if (result == null || result.getCode() != 200 || result.getData() == null) {
-                log.warn("查询用户 {} 资金失败，跳过资金校验", userId);
+                handleCashValidationFailure("查询用户 " + userId + " 资金失败(result 异常),买入总成本 ¥" + cashChangeAmount.setScale(2, RoundingMode.HALF_UP));
                 return;
             }
             BigDecimal userCash = result.getData();
             if (cashChangeAmount.compareTo(userCash) > 0) {
-                throw new BusinessException(400, "买入金额超过可用资金！买入总成本 ¥" + cashChangeAmount.setScale(2, RoundingMode.HALF_UP)
-                        + "（含手续费），当前可用现金 ¥" + userCash.setScale(2, RoundingMode.HALF_UP));
+                throw new BusinessException(BizCode.CASH_INSUFFICIENT,
+                        "买入金额超过可用资金！买入总成本 ¥" + cashChangeAmount.setScale(2, RoundingMode.HALF_UP)
+                                + "(含手续费),当前可用现金 ¥" + userCash.setScale(2, RoundingMode.HALF_UP));
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("资金校验异常，跳过校验: userId={}, error={}", userId, e.getMessage());
+            handleCashValidationFailure("资金校验异常: userId=" + userId + ", error=" + e.getMessage());
         }
+    }
+
+    private void handleCashValidationFailure(String reason) {
+        if ("allow".equalsIgnoreCase(fuliProperties.getCashValidationFailStrategy())) {
+            log.warn("资金校验失败但策略为 allow,放行: {}", reason);
+            return;
+        }
+        // 默认 reject: 拒绝交易,防止透支
+        throw new BusinessException(BizCode.CASH_VALIDATION_FAILED,
+                "资金校验失败,已拒绝交易以防止透支。原因: " + reason);
     }
 
     /**
      * 校验卖出价格是否在涨跌停范围内
      * 规则：
-     * 1. 卖出价格不能高于涨停价（前收盘价 * 1.1）
-     * 2. 卖出价格不能低于跌停价（前收盘价 * 0.9）
+     * 1. 卖出价格不能高于涨停价(前收盘价 * 1.1)
+     * 2. 卖出价格不能低于跌停价(前收盘价 * 0.9)
      * 3. 卖出价格不能为负数或零
+     * 4. 无法获取前收盘价时阻塞(提示同步行情),避免复盘时乱填价格
      */
     private void validateSellPrice(String stockCode, BigDecimal sellPrice, LocalDate tradeDate) {
-        // 价格必须大于 0
         if (sellPrice == null || sellPrice.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessException(400, "卖出价格必须大于 0");
         }
 
-        // 获取前收盘价（用于计算涨跌停价）
         BigDecimal preClosePrice = getPreClosePrice(stockCode, tradeDate);
         if (preClosePrice == null || preClosePrice.compareTo(BigDecimal.ZERO) <= 0) {
-            // 如果没有前收盘价数据，跳过涨跌停校验
-            return;
+            throw new BusinessException(BizCode.MISSING_MARKET_DATA,
+                    "无法获取股票 " + stockCode + " 的前收盘价,请先同步行情数据后再录入交易(同步页面:/sync)");
         }
 
-        // 涨停价 = 前收盘价 * 1.1（向上取整到分）
+        // 涨停价 = 前收盘价 * 1.1(向上取整到分)
         BigDecimal limitUp = preClosePrice.multiply(new BigDecimal("1.1")).setScale(2, RoundingMode.UP);
-        // 跌停价 = 前收盘价 * 0.9（向下取整到分）
+        // 跌停价 = 前收盘价 * 0.9(向下取整到分)
         BigDecimal limitDown = preClosePrice.multiply(new BigDecimal("0.9")).setScale(2, RoundingMode.DOWN);
 
         if (sellPrice.compareTo(limitUp) > 0) {
-            throw new BusinessException(400, "卖出价格 " + sellPrice + " 超过涨停价 " + limitUp);
+            throw new BusinessException(BizCode.PRICE_OUT_OF_LIMIT, "卖出价格 " + sellPrice + " 超过涨停价 " + limitUp);
         }
         if (sellPrice.compareTo(limitDown) < 0) {
-            throw new BusinessException(400, "卖出价格 " + sellPrice + " 低于跌停价 " + limitDown);
+            throw new BusinessException(BizCode.PRICE_OUT_OF_LIMIT, "卖出价格 " + sellPrice + " 低于跌停价 " + limitDown);
         }
     }
 
