@@ -1,17 +1,23 @@
 package com.fuli.data.tushare;
 
+import com.fuli.common.api.exception.BusinessException;
 import com.fuli.data.config.TushareConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.converter.HttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,12 +29,47 @@ public class TushareClient {
     private final TushareConfig tushareConfig;
     private final RestTemplate restTemplate;
 
-    public TushareClient(TushareConfig tushareConfig, RestTemplate restTemplate) {
+    public TushareClient(TushareConfig tushareConfig) {
         this.tushareConfig = tushareConfig;
-        this.restTemplate = restTemplate;
+
+        // 配置请求工厂(超时设置)
+        ClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        ((SimpleClientHttpRequestFactory) factory).setConnectTimeout(tushareConfig.getTimeout());
+        ((SimpleClientHttpRequestFactory) factory).setReadTimeout(tushareConfig.getTimeout());
+
+        this.restTemplate = createRestTemplate(factory);
+    }
+
+    /**
+     * 创建 RestTemplate 并配置消息转换器
+     * <p>
+     * 解决 Spring Boot 4.x 中 "converter is null" 的问题:
+     * 显式添加 MappingJackson2HttpMessageConverter 确保 JSON 转换正常。
+     * </p>
+     */
+    private RestTemplate createRestTemplate(ClientHttpRequestFactory factory) {
+        RestTemplate restTemplate = new RestTemplate(factory);
+
+        // 确保消息转换器列表包含 Jackson 转换器
+        List<HttpMessageConverter<?>> converters = restTemplate.getMessageConverters();
+        boolean hasJacksonConverter = converters.stream()
+                .anyMatch(c -> c instanceof MappingJackson2HttpMessageConverter);
+
+        if (!hasJacksonConverter) {
+            // 在列表开头添加 Jackson 转换器,确保 JSON 转换优先级
+            converters.add(0, new MappingJackson2HttpMessageConverter());
+            restTemplate.setMessageConverters(converters);
+        }
+
+        return restTemplate;
     }
 
     public TushareResponse call(String apiName, Map<String, Object> params, String fields) {
+        // 检查 Token 是否配置
+        if (!tushareConfig.isTokenConfigured()) {
+            throw new BusinessException("Tushare Token 未配置，请在环境变量或 application.yml 中设置 tushare.token");
+        }
+
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("api_name", apiName);
         requestBody.put("token", tushareConfig.getToken());

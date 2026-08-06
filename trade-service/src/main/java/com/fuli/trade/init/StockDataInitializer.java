@@ -24,7 +24,8 @@ public class StockDataInitializer implements ApplicationRunner {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final LocalDate START_DATE = LocalDate.of(2026, 6, 1);
-    private static final LocalDate END_DATE = LocalDate.of(2026, 7, 29);
+    // 动态计算结束日期为今天
+    private static final LocalDate END_DATE = LocalDate.now();
 
     public StockDataInitializer(StockDailyDataMapper stockDailyDataMapper, StockInfoMapper stockInfoMapper) {
         this.stockDailyDataMapper = stockDailyDataMapper;

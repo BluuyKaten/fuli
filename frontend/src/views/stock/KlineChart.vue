@@ -26,8 +26,17 @@
             <a-radio-button :value="2">卖出</a-radio-button>
           </a-radio-group>
         </a-col>
-        <a-col :span="3">
+        <a-col :span="4">
           <a-input-number v-model:value="defaultQuantity" :min="100" :step="100" style="width: 100%" addon-after="股" />
+          <div v-if="tradeType === 2" style="font-size: 12px; color: #666; margin-top: 4px">
+            可卖: <span :style="{ color: defaultQuantity > availableQuantity ? '#cf1322' : '#52c41a', fontWeight: 'bold' }">{{ availableQuantity.toLocaleString() }}</span> 股
+            <span v-if="frozenQuantity > 0" style="color: #faad14; margin-left: 8px" :title="`A股T+1：今日买入 ${frozenQuantity} 股不可卖`">
+              (T+1冻结 {{ frozenQuantity }} 股)
+            </span>
+          </div>
+          <div v-if="tradeType === 1 && currentPrice" style="font-size: 12px; color: #666; margin-top: 4px">
+            可买: <span :style="{ color: defaultQuantity > maxBuyQuantity ? '#cf1322' : '#52c41a', fontWeight: 'bold' }">{{ maxBuyQuantity.toLocaleString() }}</span> 股
+          </div>
         </a-col>
         <a-col :span="3">
           <a-button type="primary" @click="saveTradePoints" :disabled="selectedPoints.length === 0">
@@ -40,6 +49,8 @@
         <span style="font-size: 18px; font-weight: bold">{{ stockInfo.stockName }} ({{ stockInfo.stockCode }})</span>
         <span style="margin-left: 16px; color: #666">{{ stockInfo.industry }} | {{ stockInfo.market }}</span>
         <span style="margin-left: 16px; color: #1677ff">可用现金: ¥{{ userCash.toLocaleString() }}</span>
+        <span style="margin-left: 16px; color: #52c41a">当前持仓: {{ holdingQuantity.toLocaleString() }} 股</span>
+        <span v-if="currentPrice" style="margin-left: 16px; color: #faad14">当前价: ¥{{ currentPrice }}</span>
       </div>
 
       <div ref="klineChartRef" style="height: 600px; width: 100%"></div>
@@ -61,6 +72,12 @@
              </template>
              <template v-if="column.key === 'quantity'">
                <a-input-number v-model:value="record.quantity" :min="100" :step="100" size="small" style="width: 100px" />
+               <span v-if="record.type === 2" style="margin-left: 8px; font-size: 12px; color: record.quantity > availableQuantity ? '#cf1322' : '#666'">
+                 可卖{{ availableQuantity.toLocaleString() }}
+               </span>
+               <span v-if="record.type === 1" style="margin-left: 8px; font-size: 12px; color: record.quantity > maxBuyQuantityForRecord(record) ? '#cf1322' : '#666'">
+                 可买{{ maxBuyQuantityForRecord(record).toLocaleString() }}
+               </span>
              </template>
              <template v-if="column.key === 'amount'">
                <span :style="{ color: record.type === 1 ? '#1677ff' : '#52c41a' }">
@@ -78,25 +95,31 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
-import { searchStocks, getStockDaily } from '@/api/stock'
+import { searchStocks, getStockDaily, getHoldingQuantity, getStockLatestPrice, getAvailableQuantity } from '@/api/stock'
 import { createTrade } from '@/api/trade'
 import { getProfile } from '@/api/auth'
+import type { StockInfo, StockDailyData } from '@/types'
 
 const searchKeyword = ref('')
-const searchOptions = ref<any[]>([])
+const searchOptions = ref<(StockInfo & { value: string; label: string })[]>([])
 const selectedStockCode = ref('')
 const dateRange = ref<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
 const loading = ref(false)
-const stockInfo = ref<any>(null)
-const dailyData = ref<any[]>([])
-const selectedPoints = ref<any[]>([])
+const stockInfo = ref<StockInfo | null>(null)
+const dailyData = ref<StockDailyData[]>([])
+const selectedPoints = ref<TradePoint[]>([])
 const tradeType = ref(1)
 const defaultQuantity = ref(100)
 const userCash = ref(0)
+const holdingQuantity = ref(0)
+const availableQuantity = ref(0)
+const frozenQuantity = ref(0)
+const tradeRule = ref('T+1')
+const currentPrice = ref('')
 
 const klineChartRef = ref()
 const volumeChartRef = ref()
@@ -108,13 +131,42 @@ let volumeChart: echarts.ECharts | null = null
 let macdChart: echarts.ECharts | null = null
 let kdjChart: echarts.ECharts | null = null
 
+// 计算可买数量（基于可用资金和当前价格，A股最小交易单位100股）
+const maxBuyQuantity = computed(() => {
+  if (!currentPrice.value || userCash.value <= 0) return 0
+  const price = Number(currentPrice.value)
+  if (price <= 0) return 0
+  // 简单计算：可买数量 = floor(可用资金 / 价格 / 100) * 100
+  // 注意：未考虑手续费，实际可买数量可能略少
+  const quantity = Math.floor(userCash.value / price / 100) * 100
+  return Math.max(0, quantity)
+})
+
+// 针对每条买入记录计算可买数量
+const maxBuyQuantityForRecord = (record: TradePoint) => {
+  if (userCash.value <= 0) return 0
+  const price = record.price
+  if (price <= 0) return 0
+  const quantity = Math.floor(userCash.value / price / 100) * 100
+  return Math.max(0, quantity)
+}
+
+interface TradePoint {
+  id: number
+  type: number
+  date: string
+  price: number
+  quantity: number
+  stockCode: string
+}
+
 const pointColumns = [
-  { title: '类型', key: 'type' },
-  { title: '日期', dataIndex: 'date', key: 'date' },
-  { title: '价格', dataIndex: 'price', key: 'price' },
-  { title: '数量', key: 'quantity' },
-  { title: '金额', key: 'amount' },
-  { title: '操作', key: 'action' }
+  { title: '类型', key: 'type' as const },
+  { title: '日期', dataIndex: 'date', key: 'date' as const },
+  { title: '价格', dataIndex: 'price', key: 'price' as const },
+  { title: '数量', key: 'quantity' as const },
+  { title: '金额', key: 'amount' as const },
+  { title: '操作', key: 'action' as const }
 ]
 
 const handleSearch = async (value: string) => {
@@ -122,10 +174,10 @@ const handleSearch = async (value: string) => {
   try {
     const res = await searchStocks(value)
     if (res.code === 200) {
-      searchOptions.value = res.data.map((item: any) => ({
+      searchOptions.value = res.data.map((item: StockInfo) => ({
+        ...item,
         value: item.stockCode,
-        label: `${item.stockName} (${item.stockCode})`,
-        ...item
+        label: `${item.stockName} (${item.stockCode})`
       }))
     }
   } catch {
@@ -135,11 +187,72 @@ const handleSearch = async (value: string) => {
 
 const handleSelectStock = async (value: string) => {
   selectedStockCode.value = value
-  const option = searchOptions.value.find((o: any) => o.value === value)
+  const option = searchOptions.value.find((o: StockInfo & { value: string }) => o.value === value)
   if (option) {
     stockInfo.value = option
   }
   selectedPoints.value = []
+
+  // 查询当前持仓、可卖数量和最新价格
+  await loadAvailableQuantity(value)
+  await loadCurrentPrice(value)
+}
+
+const loadHoldingQuantity = async (stockCode: string) => {
+  try {
+    let userId = Number(localStorage.getItem('userId') || '0')
+    // 如果 localStorage 中没有 userId，从 profile 接口获取
+    if (userId <= 0) {
+      const profileRes = await getProfile()
+      if (profileRes.code === 200 && profileRes.data && profileRes.data.id) {
+        userId = profileRes.data.id
+        localStorage.setItem('userId', String(userId))
+      }
+    }
+    if (userId <= 0) return
+    const res = await getHoldingQuantity(userId, stockCode)
+    if (res.code === 200 && res.data) {
+      holdingQuantity.value = res.data.holdingQuantity || 0
+    }
+  } catch {
+    holdingQuantity.value = 0
+  }
+}
+
+// 加载可卖数量（考虑A股T+1规则）
+const loadAvailableQuantity = async (stockCode: string) => {
+  try {
+    let userId = Number(localStorage.getItem('userId') || '0')
+    if (userId <= 0) {
+      const profileRes = await getProfile()
+      if (profileRes.code === 200 && profileRes.data && profileRes.data.id) {
+        userId = profileRes.data.id
+        localStorage.setItem('userId', String(userId))
+      }
+    }
+    if (userId <= 0) return
+    const res = await getAvailableQuantity(userId, stockCode)
+    if (res.code === 200 && res.data) {
+      holdingQuantity.value = res.data.totalQuantity || 0
+      availableQuantity.value = res.data.availableQuantity || 0
+      frozenQuantity.value = res.data.frozenQuantity || 0
+      tradeRule.value = res.data.tradeRule || 'T+1'
+    }
+  } catch {
+    availableQuantity.value = 0
+    frozenQuantity.value = 0
+  }
+}
+
+const loadCurrentPrice = async (stockCode: string) => {
+  try {
+    const res = await getStockLatestPrice(stockCode)
+    if (res.code === 200 && res.data) {
+      currentPrice.value = res.data.closePrice || ''
+    }
+  } catch {
+    currentPrice.value = ''
+  }
 }
 
 const loadProfile = async () => {
@@ -575,6 +688,36 @@ const removePoint = (id: number) => {
 
 const saveTradePoints = async () => {
   if (selectedPoints.value.length === 0) return
+
+  // 校验卖出数量是否超过可卖数量
+  const sellPoints = selectedPoints.value.filter(p => p.type === 2)
+  if (sellPoints.length > 0) {
+    const totalSellQuantity = sellPoints.reduce((sum, p) => sum + p.quantity, 0)
+    if (totalSellQuantity > availableQuantity.value) {
+      message.error(`卖出数量超过可卖范围！本次卖出 ${totalSellQuantity} 股，当前可卖 ${availableQuantity.value} 股`)
+      return
+    }
+  }
+
+  // 校验买入金额是否超过可用资金
+  const buyPoints = selectedPoints.value.filter(p => p.type === 1)
+  if (buyPoints.length > 0) {
+    // 先校验每个买入点的数量是否超过该价格下的可买数量
+    for (const point of buyPoints) {
+      const maxQty = Math.floor(userCash.value / point.price / 100) * 100
+      if (point.quantity > maxQty) {
+        message.error(`${point.date} 买入数量超过可买范围！价格 ¥${point.price}，买入 ${point.quantity} 股，当前最多可买 ${maxQty.toLocaleString()} 股`)
+        return
+      }
+    }
+    // 再校验买入总金额是否超过可用资金
+    const totalBuyAmount = buyPoints.reduce((sum, p) => sum + p.price * p.quantity, 0)
+    if (totalBuyAmount > userCash.value) {
+      message.error(`买入总金额超过可用资金！买入总额 ¥${totalBuyAmount.toLocaleString()}，当前可用现金 ¥${userCash.value.toLocaleString()}`)
+      return
+    }
+  }
+
   try {
     for (const point of selectedPoints.value) {
       await createTrade({
@@ -590,6 +733,10 @@ const saveTradePoints = async () => {
     selectedPoints.value = []
     updateMarkPoints()
     loadProfile()
+    // 保存后重新加载可卖数量
+    if (selectedStockCode.value) {
+      await loadAvailableQuantity(selectedStockCode.value)
+    }
   } catch (error: any) {
     message.error(error.message || '保存失败')
   }

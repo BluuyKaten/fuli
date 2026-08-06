@@ -102,10 +102,18 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { getMonthlyProfit, getAssetCurve, getDashboardData } from '@/api/analysis'
+import type { DashboardData, MonthlyProfit, AssetCurve } from '@/types'
 
-const dashboardData = ref<any>({})
-const monthlyData = ref<any[]>([])
-const assetCurveData = ref<{ dates: string[]; assets: number[] }>({
+const dashboardData = ref<DashboardData>({
+  totalAssets: 0,
+  profitPercentage: 0,
+  floatingProfitLoss: 0,
+  totalMarketValue: 0,
+  cashBalance: 0,
+  positions: []
+})
+const monthlyData = ref<MonthlyProfit[]>([])
+const assetCurveData = ref<AssetCurve>({
   dates: [],
   assets: []
 })
@@ -140,10 +148,10 @@ const renderMonthlyChart = async () => {
   monthlyChart = echarts.init(monthlyChartRef.value)
   monthlyChart.setOption({
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: monthlyData.value.map((i: any) => i.month) },
+    xAxis: { type: 'category', data: monthlyData.value.map((i: MonthlyProfit) => i.month) },
     yAxis: { type: 'value' },
     series: [{
-      data: monthlyData.value.map((i: any) => i.profitLoss),
+      data: monthlyData.value.map((i: MonthlyProfit) => i.profitLoss),
       type: 'bar',
       itemStyle: { color: (params: any) => params.value >= 0 ? '#cf1322' : '#3f8600' }
     }]
@@ -179,7 +187,14 @@ const loadDashboardData = async () => {
       getAssetCurve()
     ])
 
-    dashboardData.value = dashboardRes.data || {}
+    dashboardData.value = dashboardRes.data || {
+      totalAssets: 0,
+      profitPercentage: 0,
+      floatingProfitLoss: 0,
+      totalMarketValue: 0,
+      cashBalance: 0,
+      positions: []
+    }
     monthlyData.value = Array.isArray(monthlyRes.data) ? monthlyRes.data : []
     assetCurveData.value = assetRes.data || { dates: [], assets: [] }
 

@@ -5,96 +5,159 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
 import com.fuli.common.api.enums.TradeTypeEnum;
+import com.fuli.common.api.exception.BusinessException;
+import com.fuli.common.api.feign.AuthFeignClient;
+import com.fuli.common.api.Result;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
+import com.fuli.trade.entity.LocalMessage;
+import com.fuli.trade.entity.StockDailyData;
 import com.fuli.trade.entity.TradeRecord;
-import com.fuli.trade.feign.AuthFeignClient;
+import com.fuli.trade.event.TradeCreatedEvent;
+import com.fuli.trade.mapper.StockDailyDataMapper;
 import com.fuli.trade.mapper.TradeRecordMapper;
+import com.fuli.trade.service.LocalMessageService;
+import com.fuli.trade.service.PositionSummaryService;
 import com.fuli.trade.service.TradeRecordService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.service.impl.ServiceImpl<TradeRecordMapper, TradeRecord> implements TradeRecordService {
 
+    private final PositionSummaryService positionSummaryService;
+    private final LocalMessageService localMessageService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final StockDailyDataMapper stockDailyDataMapper;
     private final AuthFeignClient authFeignClient;
 
-    public TradeRecordServiceImpl(AuthFeignClient authFeignClient) {
+    public TradeRecordServiceImpl(PositionSummaryService positionSummaryService,
+                                  LocalMessageService localMessageService,
+                                  ApplicationEventPublisher eventPublisher,
+                                  StockDailyDataMapper stockDailyDataMapper,
+                                  AuthFeignClient authFeignClient) {
+        this.positionSummaryService = positionSummaryService;
+        this.localMessageService = localMessageService;
+        this.eventPublisher = eventPublisher;
+        this.stockDailyDataMapper = stockDailyDataMapper;
         this.authFeignClient = authFeignClient;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createTrade(TradeDTO tradeDTO) {
+        // 1. 基础校验
+        if (tradeDTO.getUserId() == null) {
+            throw new BusinessException(400, "用户ID不能为空");
+        }
+        if (tradeDTO.getTradePrice() == null || tradeDTO.getTradePrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException(400, "成交价格必须大于0");
+        }
+        if (tradeDTO.getTradeQuantity() == null || tradeDTO.getTradeQuantity() <= 0) {
+            throw new BusinessException(400, "成交数量必须大于0");
+        }
+
         TradeRecord record = new TradeRecord();
         BeanUtils.copyProperties(tradeDTO, record);
 
-        record.setTradeAmount(tradeDTO.getTradePrice().multiply(BigDecimal.valueOf(tradeDTO.getTradeQuantity())));
+        // 2. 计算成交金额
+        BigDecimal tradeAmount = tradeDTO.getTradePrice().multiply(BigDecimal.valueOf(tradeDTO.getTradeQuantity()));
+        record.setTradeAmount(tradeAmount);
         record.setCommission(tradeDTO.getCommission() != null ? tradeDTO.getCommission() : BigDecimal.ZERO);
         record.setTax(tradeDTO.getTax() != null ? tradeDTO.getTax() : BigDecimal.ZERO);
 
+        BigDecimal cashChangeAmount; // 需要变动的资金金额
+
         if (TradeTypeEnum.SELL.getCode().equals(tradeDTO.getTradeType())) {
-            record.setTotalCost(record.getTradeAmount().subtract(record.getCommission()).subtract(record.getTax()));
-            // 计算卖出盈亏：查询持仓均价
-            BigDecimal avgCost = getAvgCost(tradeDTO.getUserId(), tradeDTO.getStockCode());
-            if (avgCost != null && avgCost.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal profitLoss = tradeDTO.getTradePrice().subtract(avgCost)
-                        .multiply(BigDecimal.valueOf(tradeDTO.getTradeQuantity()))
-                        .subtract(record.getCommission()).subtract(record.getTax());
-                record.setProfitLoss(profitLoss);
+            // 3. 卖出：先校验持仓是否足够，并获取可卖数量
+            int holdingQuantity = positionSummaryService.getHoldingQuantity(tradeDTO.getUserId(), tradeDTO.getStockCode());
+            if (holdingQuantity <= 0) {
+                throw new BusinessException(400, "当前无持仓，无法卖出");
+            }
+            if (tradeDTO.getTradeQuantity() > holdingQuantity) {
+                throw new BusinessException(400, "卖出数量超过持仓，当前可卖 " + holdingQuantity + " 股");
+            }
+
+            // 4. 校验卖出价格是否在涨跌停范围内
+            validateSellPrice(tradeDTO.getStockCode(), tradeDTO.getTradePrice(), tradeDTO.getTradeDate());
+
+            // 5. 获取加权平均成本
+            BigDecimal avgCost = positionSummaryService.getAvgCost(tradeDTO.getUserId(), tradeDTO.getStockCode());
+            if (avgCost == null) {
+                avgCost = tradeDTO.getTradePrice(); // 兜底
+            }
+
+            // 6. 计算卖出盈亏
+            BigDecimal totalCost = tradeAmount.subtract(record.getCommission()).subtract(record.getTax());
+            record.setTotalCost(totalCost);
+
+            BigDecimal profitLoss = tradeDTO.getTradePrice().subtract(avgCost)
+                    .multiply(BigDecimal.valueOf(tradeDTO.getTradeQuantity()))
+                    .subtract(record.getCommission()).subtract(record.getTax());
+            record.setProfitLoss(profitLoss);
+
+            if (avgCost.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal ratio = profitLoss.divide(
                         avgCost.multiply(BigDecimal.valueOf(tradeDTO.getTradeQuantity())),
                         4, RoundingMode.HALF_UP);
                 record.setProfitLossRatio(ratio);
             }
-            // 卖出入账
-            BigDecimal sellIncome = record.getTradeAmount().subtract(record.getCommission()).subtract(record.getTax());
-            authFeignClient.addCash(tradeDTO.getUserId(), sellIncome);
+
+            // 7. 卖出入账金额 = 卖出金额 - 手续费 - 印花税
+            cashChangeAmount = totalCost;
+
         } else {
-            record.setTotalCost(record.getTradeAmount().add(record.getCommission()).add(record.getTax()));
-            // 买入扣款
-            authFeignClient.deductCash(tradeDTO.getUserId(), record.getTotalCost());
+            // 7. 买入：总成本 = 成交金额 + 手续费 + 印花税
+            cashChangeAmount = tradeAmount.add(record.getCommission()).add(record.getTax());
+            record.setTotalCost(cashChangeAmount);
+
+            // 8. 校验买入资金是否充足
+            validateBuyCash(tradeDTO.getUserId(), cashChangeAmount);
         }
 
         if (tradeDTO.getTradeTime() == null) {
             record.setTradeTime(LocalDateTime.now());
         }
 
+        // 8. 保存交易记录
         save(record);
-        return record.getId();
-    }
 
-    private BigDecimal getAvgCost(Long userId, String stockCode) {
-        LambdaQueryWrapper<TradeRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TradeRecord::getUserId, userId)
-                .eq(TradeRecord::getStockCode, stockCode)
-                .eq(TradeRecord::getTradeType, TradeTypeEnum.BUY.getCode())
-                .gt(TradeRecord::getProfitLoss, BigDecimal.ZERO)
-                .orderByDesc(TradeRecord::getTradeDate)
-                .last("LIMIT 1");
-        TradeRecord lastBuy = getOne(wrapper);
-        if (lastBuy != null) {
-            return lastBuy.getTradePrice();
+        // 9. 更新持仓汇总
+        if (TradeTypeEnum.SELL.getCode().equals(tradeDTO.getTradeType())) {
+            positionSummaryService.decreasePosition(tradeDTO.getUserId(), tradeDTO.getStockCode(), tradeDTO.getTradeQuantity());
+        } else {
+            positionSummaryService.increasePosition(tradeDTO.getUserId(), tradeDTO.getStockCode(),
+                    tradeDTO.getStockName(), tradeDTO.getTradeQuantity(), tradeDTO.getTradePrice());
         }
-        // 如果没有盈利的买入记录，取最近一笔买入
-        wrapper.clear();
-        wrapper.eq(TradeRecord::getUserId, userId)
-                .eq(TradeRecord::getStockCode, stockCode)
-                .eq(TradeRecord::getTradeType, TradeTypeEnum.BUY.getCode())
-                .orderByDesc(TradeRecord::getTradeDate)
-                .last("LIMIT 1");
-        TradeRecord recentBuy = getOne(wrapper);
-        return recentBuy != null ? recentBuy.getTradePrice() : null;
+
+        // 10. 写入本地消息表（用于跨服务事务最终一致性）
+        String topic = TradeTypeEnum.SELL.getCode().equals(tradeDTO.getTradeType()) ? "TRADE_SELL" : "TRADE_BUY";
+        String payload = String.format("{\"userId\":%d,\"amount\":%s}", tradeDTO.getUserId(), cashChangeAmount.toPlainString());
+        LocalMessage message = localMessageService.createPendingMessage(
+                UUID.randomUUID().toString(), topic, payload);
+        record.setRemark((record.getRemark() != null ? record.getRemark() + " " : "") + "[msgId=" + message.getMsgId() + "]");
+
+        // 11. 发布事件（事务提交后异步处理资金变动）
+        eventPublisher.publishEvent(new TradeCreatedEvent(
+                this, record.getId(), tradeDTO.getUserId(), tradeDTO.getTradeType(),
+                tradeDTO.getStockCode(), tradeDTO.getStockName(),
+                cashChangeAmount, tradeDTO.getTradePrice(), tradeDTO.getTradeQuantity()));
+
+        return record.getId();
     }
 
     @Override
@@ -258,5 +321,80 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         wrapper.eq(TradeRecord::getUserId, userId);
         remove(wrapper);
         return true;
+    }
+
+    /**
+     * 校验买入资金是否充足
+     * 规则：买入总成本（成交金额 + 手续费 + 印花税）不能超过用户可用现金
+     */
+    private void validateBuyCash(Long userId, BigDecimal cashChangeAmount) {
+        try {
+            Result<BigDecimal> result = authFeignClient.getUserCash(userId);
+            if (result == null || result.getCode() != 200 || result.getData() == null) {
+                log.warn("查询用户 {} 资金失败，跳过资金校验", userId);
+                return;
+            }
+            BigDecimal userCash = result.getData();
+            if (cashChangeAmount.compareTo(userCash) > 0) {
+                throw new BusinessException(400, "买入金额超过可用资金！买入总成本 ¥" + cashChangeAmount.setScale(2, RoundingMode.HALF_UP)
+                        + "（含手续费），当前可用现金 ¥" + userCash.setScale(2, RoundingMode.HALF_UP));
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("资金校验异常，跳过校验: userId={}, error={}", userId, e.getMessage());
+        }
+    }
+
+    /**
+     * 校验卖出价格是否在涨跌停范围内
+     * 规则：
+     * 1. 卖出价格不能高于涨停价（前收盘价 * 1.1）
+     * 2. 卖出价格不能低于跌停价（前收盘价 * 0.9）
+     * 3. 卖出价格不能为负数或零
+     */
+    private void validateSellPrice(String stockCode, BigDecimal sellPrice, LocalDate tradeDate) {
+        // 价格必须大于 0
+        if (sellPrice == null || sellPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException(400, "卖出价格必须大于 0");
+        }
+
+        // 获取前收盘价（用于计算涨跌停价）
+        BigDecimal preClosePrice = getPreClosePrice(stockCode, tradeDate);
+        if (preClosePrice == null || preClosePrice.compareTo(BigDecimal.ZERO) <= 0) {
+            // 如果没有前收盘价数据，跳过涨跌停校验
+            return;
+        }
+
+        // 涨停价 = 前收盘价 * 1.1（向上取整到分）
+        BigDecimal limitUp = preClosePrice.multiply(new BigDecimal("1.1")).setScale(2, RoundingMode.UP);
+        // 跌停价 = 前收盘价 * 0.9（向下取整到分）
+        BigDecimal limitDown = preClosePrice.multiply(new BigDecimal("0.9")).setScale(2, RoundingMode.DOWN);
+
+        if (sellPrice.compareTo(limitUp) > 0) {
+            throw new BusinessException(400, "卖出价格 " + sellPrice + " 超过涨停价 " + limitUp);
+        }
+        if (sellPrice.compareTo(limitDown) < 0) {
+            throw new BusinessException(400, "卖出价格 " + sellPrice + " 低于跌停价 " + limitDown);
+        }
+    }
+
+    /**
+     * 获取前收盘价
+     */
+    private BigDecimal getPreClosePrice(String stockCode, LocalDate tradeDate) {
+        try {
+            // 查询交易日期当天或最近的行情数据
+            LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(StockDailyData::getStockCode, stockCode)
+                    .le(StockDailyData::getTradeDate, tradeDate.format(DateTimeFormatter.ofPattern("yyyyMMdd")))
+                    .orderByDesc(StockDailyData::getTradeDate)
+                    .last("LIMIT 1");
+            StockDailyData dailyData = stockDailyDataMapper.selectOne(wrapper);
+            return dailyData != null ? dailyData.getPreClose() : null;
+        } catch (Exception e) {
+            log.warn("获取股票 {} 前收盘价失败", stockCode);
+            return null;
+        }
     }
 }

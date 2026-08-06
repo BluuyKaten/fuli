@@ -84,7 +84,7 @@ const onFinish = async (values: { username: string; password: string }) => {
     } else {
       const res = await loginApi(values)
       if (res.code === 200) {
-        userStore.setToken(res.data.token, res.data.username, res.data.nickname)
+        userStore.setToken(res.data.token, res.data.username, res.data.nickname, res.data.userId, res.data.cash)
         message.success('登录成功')
         router.push('/dashboard')
       }

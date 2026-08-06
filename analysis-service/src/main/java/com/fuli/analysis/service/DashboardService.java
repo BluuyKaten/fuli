@@ -1,15 +1,10 @@
 package com.fuli.analysis.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fuli.common.api.dto.TradeQueryDTO;
 import com.fuli.common.api.feign.AuthFeignClient;
 import com.fuli.common.api.feign.TradeFeignClient;
 import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.TradeVO;
-import com.fuli.trade.entity.StockDailyData;
-import com.fuli.trade.entity.StockInfo;
-import com.fuli.trade.mapper.StockDailyDataMapper;
-import com.fuli.trade.mapper.StockInfoMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -26,17 +21,11 @@ public class DashboardService {
 
     private final TradeFeignClient tradeFeignClient;
     private final AuthFeignClient authFeignClient;
-    private final StockDailyDataMapper stockDailyDataMapper;
-    private final StockInfoMapper stockInfoMapper;
 
     public DashboardService(TradeFeignClient tradeFeignClient,
-                            AuthFeignClient authFeignClient,
-                            StockDailyDataMapper stockDailyDataMapper,
-                            StockInfoMapper stockInfoMapper) {
+                            AuthFeignClient authFeignClient) {
         this.tradeFeignClient = tradeFeignClient;
         this.authFeignClient = authFeignClient;
-        this.stockDailyDataMapper = stockDailyDataMapper;
-        this.stockInfoMapper = stockInfoMapper;
     }
 
     public Map<String, Object> getDashboardData(Long userId) {
@@ -74,6 +63,7 @@ public class DashboardService {
 
             BigDecimal costPrice = totalBuyAmount.divide(BigDecimal.valueOf(totalBuyQuantity), 4, RoundingMode.HALF_UP);
 
+            // 通过 Feign 获取最新行情
             StockLatestPrice latestPrice = getLatestPrice(stockCode);
             BigDecimal currentPrice = latestPrice != null ? latestPrice.price : costPrice;
             LocalDate priceDate = latestPrice != null ? latestPrice.tradeDate : null;
@@ -87,8 +77,8 @@ public class DashboardService {
                 dailyProfitLoss = currentPrice.subtract(latestPrice.preClose).multiply(BigDecimal.valueOf(holdingQuantity));
             }
 
-            StockInfo stockInfo = stockInfoMapper.selectById(stockCode);
-            String stockName = stockInfo != null ? stockInfo.getStockName() : stockCode;
+            // 通过 Feign 获取股票名称
+            String stockName = getStockName(stockCode, stockTrades);
 
             PositionVO position = new PositionVO();
             position.setStockCode(stockCode);
@@ -108,15 +98,22 @@ public class DashboardService {
         }
 
         BigDecimal cashBalance = getUserCashBalance(userId);
-        BigDecimal initialCash = getUserInitialCash(userId);
 
+        // 总资产 = 资金余额 + 总市值
         BigDecimal totalAssets = cashBalance.add(totalMarketValue);
-        BigDecimal totalProfitLoss = totalAssets.subtract(initialCash);
-        BigDecimal profitPercentage = totalProfitLoss.divide(initialCash, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+
+        // 浮动盈亏 = 总市值 - 持仓总成本（仅持仓部分的账面盈亏）
+        BigDecimal floatingProfitLoss = totalMarketValue.subtract(totalCost);
+
+        // 盈利百分比 = 浮动盈亏 / 持仓总成本 × 100%
+        BigDecimal profitPercentage = BigDecimal.ZERO;
+        if (totalCost.compareTo(BigDecimal.ZERO) > 0) {
+            profitPercentage = floatingProfitLoss.divide(totalCost, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
+        }
 
         result.put("totalAssets", totalAssets.setScale(2, RoundingMode.HALF_UP));
         result.put("profitPercentage", profitPercentage.setScale(2, RoundingMode.HALF_UP));
-        result.put("floatingProfitLoss", totalProfitLoss.setScale(2, RoundingMode.HALF_UP));
+        result.put("floatingProfitLoss", floatingProfitLoss.setScale(2, RoundingMode.HALF_UP));
         result.put("totalMarketValue", totalMarketValue.setScale(2, RoundingMode.HALF_UP));
         result.put("cashBalance", cashBalance.setScale(2, RoundingMode.HALF_UP));
         result.put("positions", positions);
@@ -135,31 +132,47 @@ public class DashboardService {
     }
 
     private StockLatestPrice getLatestPrice(String stockCode) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, stockCode)
-                .orderByDesc(StockDailyData::getTradeDate)
-                .last("LIMIT 1");
-        StockDailyData latest = stockDailyDataMapper.selectOne(wrapper);
-        if (latest != null) {
-            return new StockLatestPrice(
-                    latest.getClosePrice() != null ? latest.getClosePrice() : BigDecimal.ZERO,
-                    latest.getTradeDate() != null ? LocalDate.parse(latest.getTradeDate(), DateTimeFormatter.ofPattern("yyyyMMdd")) : null,
-                    latest.getPreClose() != null ? latest.getPreClose() : null
-            );
+        try {
+            var result = tradeFeignClient.getLatestPrice(stockCode);
+            if (result != null && result.getCode() == 200 && result.getData() != null) {
+                Map<String, Object> data = result.getData();
+                BigDecimal closePrice = data.get("closePrice") != null
+                        ? new BigDecimal(data.get("closePrice").toString()) : BigDecimal.ZERO;
+                String tradeDateStr = data.get("tradeDate") != null ? data.get("tradeDate").toString() : null;
+                LocalDate tradeDate = tradeDateStr != null
+                        ? LocalDate.parse(tradeDateStr, DateTimeFormatter.ofPattern("yyyyMMdd")) : null;
+                BigDecimal preClose = data.get("preClose") != null
+                        ? new BigDecimal(data.get("preClose").toString()) : null;
+                return new StockLatestPrice(closePrice, tradeDate, preClose);
+            }
+        } catch (Exception e) {
+            log.warn("获取最新行情失败: stockCode={}, error={}", stockCode, e.getMessage());
         }
         return null;
     }
 
-    private BigDecimal getUserCashBalance(Long userId) {
-        var result = authFeignClient.getUserCash(userId);
-        if (result != null && result.getCode() == 200 && result.getData() != null) {
-            return result.getData();
+    private String getStockName(String stockCode, List<TradeVO> stockTrades) {
+        // 优先从交易记录中获取名称
+        for (TradeVO trade : stockTrades) {
+            if (trade.getStockName() != null && !trade.getStockName().isEmpty()) {
+                return trade.getStockName();
+            }
         }
-        return new BigDecimal("200000.00");
+        // 通过 Feign 获取
+        try {
+            var result = tradeFeignClient.getStockInfo(stockCode);
+            if (result != null && result.getCode() == 200 && result.getData() != null) {
+                Object name = result.getData().get("stockName");
+                if (name != null) return name.toString();
+            }
+        } catch (Exception e) {
+            log.warn("获取股票名称失败: stockCode={}", stockCode);
+        }
+        return stockCode;
     }
 
-    private BigDecimal getUserInitialCash(Long userId) {
-        var result = authFeignClient.getUserInitialCash(userId);
+    private BigDecimal getUserCashBalance(Long userId) {
+        var result = authFeignClient.getUserCash(userId);
         if (result != null && result.getCode() == 200 && result.getData() != null) {
             return result.getData();
         }

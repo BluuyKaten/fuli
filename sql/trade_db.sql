@@ -91,3 +91,22 @@ CREATE TABLE `stock_daily_data` (
     UNIQUE KEY `uk_code_trade_date` (`stock_code`,`trade_date`),
     KEY `idx_trade_date` (`trade_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='Stock daily market data';
+
+-- 本地消息表（用于跨服务事务最终一致性）
+DROP TABLE IF EXISTS `local_message`;
+CREATE TABLE `local_message` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `msg_id` VARCHAR(64) NOT NULL COMMENT '消息唯一ID',
+    `topic` VARCHAR(64) NOT NULL COMMENT '消息主题（如 TRADE_BUY / TRADE_SELL）',
+    `payload` TEXT NOT NULL COMMENT '消息体（JSON）',
+    `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态：0-PENDING 1-SUCCESS 2-FAILED 3-DEAD_LETTER',
+    `retry_count` INT NOT NULL DEFAULT 0 COMMENT '已重试次数',
+    `max_retry` INT NOT NULL DEFAULT 3 COMMENT '最大重试次数',
+    `next_retry_time` DATETIME DEFAULT NULL COMMENT '下次重试时间',
+    `last_error` VARCHAR(512) DEFAULT NULL COMMENT '最后一次错误信息',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_msg_id` (`msg_id`),
+    KEY `idx_status_retry` (`status`, `next_retry_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='本地消息表（最终一致性）';

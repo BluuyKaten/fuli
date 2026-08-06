@@ -1,0 +1,27 @@
+# The proper term is pseudo_replica_mode, but we use this compatibility alias
+# to make the statement usable on server versions 8.0.24 and older.
+/*!50530 SET @@SESSION.PSEUDO_SLAVE_MODE=1*/;
+/*!50003 SET @OLD_COMPLETION_TYPE=@@COMPLETION_TYPE,COMPLETION_TYPE=0*/;
+DELIMITER /*!*/;
+# at 4
+#260627  0:49:09 server id 1  end_log_pos 127 CRC32 0x0a6264d4 	Start: binlog v 4, server v 8.4.8 created 260627  0:49:09 at startup
+ROLLBACK/*!*/;
+BINLOG '
+ha0+ag8BAAAAewAAAH8AAAAAAAQAOC40LjgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAACFrT5qEwANAAgAAAAABAAEAAAAYwAEGggAAAAAAAACAAAACgoKKioAEjQA
+CigAAAHUZGIK
+'/*!*/;
+SET @@SESSION.GTID_NEXT= 'AUTOMATIC' /* added by mysqlbinlog */ /*!*/;
+# at 4
+#260628 13:56:51 server id 1  end_log_pos 127 CRC32 0x6e0262e0 	Start: binlog v 4, server v 8.4.8 created 260628 13:56:51 at startup
+ROLLBACK/*!*/;
+BINLOG '
+o7dAag8BAAAAewAAAH8AAAAAAAQAOC40LjgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAACjt0BqEwANAAgAAAAABAAEAAAAYwAEGggAAAAAAAACAAAACgoKKioAEjQA
+CigAAAHgYgJu
+'/*!*/;
+SET @@SESSION.GTID_NEXT= 'AUTOMATIC' /* added by mysqlbinlog */ /*!*/;
+DELIMITER ;
+# End of log file
+/*!50003 SET COMPLETION_TYPE=@OLD_COMPLETION_TYPE*/;
+/*!50530 SET @@SESSION.PSEUDO_SLAVE_MODE=0*/;

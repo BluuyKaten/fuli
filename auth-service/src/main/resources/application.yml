@@ -6,10 +6,10 @@ spring:
   cloud:
     nacos:
       config:
-        server-addr: 127.0.0.1:8848
+        server-addr: ${NACOS_SERVER:127.0.0.1:8848}
         file-extension: yaml
       discovery:
-        server-addr: 127.0.0.1:8848
+        server-addr: ${NACOS_SERVER:127.0.0.1:8848}
 
 server:
   port: 8081
@@ -17,12 +17,12 @@ server:
 spring.datasource:
   driver-class-name: com.mysql.cj.jdbc.Driver
   url: jdbc:mysql://127.0.0.1:3306/auth_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
-  username: root
-  password: 123456
+  username: ${DB_USERNAME:root}
+  password: ${DB_PASSWORD:123456}
 
 spring.data.redis:
-  host: 127.0.0.1
-  port: 6379
+  host: ${REDIS_HOST:127.0.0.1}
+  port: ${REDIS_PORT:6379}
   database: 0
 
 mybatis-plus:
@@ -32,7 +32,11 @@ mybatis-plus:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
 jwt:
-  secret: your-256-bit-secret-key-here-must-be-at-least-32-characters-long
+  secret: ${JWT_SECRET:your-256-bit-secret-key-here-must-be-at-least-32-characters-long}
   expiration: 86400000
   header: Authorization
   prefix: "Bearer "
+
+# 内部接口调用密钥（用于 /auth/internal/** 接口鉴权）
+fuli:
+  internal-key: ${INTERNAL_KEY:fuli-stock-internal-2025-secure-key}

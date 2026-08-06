@@ -15,6 +15,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
@@ -22,16 +23,30 @@ public class TushareSyncServiceImpl implements TushareSyncService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
+    /**
+     * 单个交易日数据量阈值(含):若数据库中该交易日数据 >= 此值,视为已同步过,跳过
+     * A 股全市场目前约 5000+ 只股票,考虑退市等因素,4800 条以上即认为已完整
+     */
+    private static final int SKIP_THRESHOLD = 4800;
+
+    /**
+     * 每分钟最大请求次数,Tushare 基础积分限制 500 次/分钟,留有余量
+     */
+    private static final int MAX_REQUESTS_PER_MINUTE = 400;
+
     private final TushareClient tushareClient;
     private final StockInfoMapper stockInfoMapper;
     private final StockDailyDataMapper stockDailyDataMapper;
+    private final SyncProgressManager progressManager;
 
     public TushareSyncServiceImpl(TushareClient tushareClient,
                                   StockInfoMapper stockInfoMapper,
-                                  StockDailyDataMapper stockDailyDataMapper) {
+                                  StockDailyDataMapper stockDailyDataMapper,
+                                  SyncProgressManager progressManager) {
         this.tushareClient = tushareClient;
         this.stockInfoMapper = stockInfoMapper;
         this.stockDailyDataMapper = stockDailyDataMapper;
+        this.progressManager = progressManager;
     }
 
     @Override
@@ -225,67 +240,237 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         return syncByDateRangeInBatches(startDate, endDate);
     }
 
-    private int syncByDateRangeInBatches(LocalDate startDate, LocalDate endDate) {
+    @Override
+    public String syncDailyDataByDateRange(String startDate, String endDate, boolean forceSync) {
+        // 1. 参数校验
+        if (startDate == null || startDate.isEmpty() || endDate == null || endDate.isEmpty()) {
+            throw new IllegalArgumentException("起始日期和结束日期不能为空");
+        }
+        if (startDate.length() != 8 || endDate.length() != 8) {
+            throw new IllegalArgumentException("日期格式必须为 yyyyMMdd,例如 20250101");
+        }
+
+        LocalDate start;
+        LocalDate end;
+        try {
+            start = LocalDate.parse(startDate, DATE_FMT);
+            end = LocalDate.parse(endDate, DATE_FMT);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("日期格式错误: " + e.getMessage(), e);
+        }
+
+        if (start.isAfter(end)) {
+            throw new IllegalArgumentException("起始日期不能晚于结束日期");
+        }
+
+        // 2. 限制最大同步范围,避免时间过长(最多 400 天)
+        long totalDays = java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
+        if (totalDays > 400) {
+            throw new IllegalArgumentException(
+                    "同步日期范围过大(共 " + totalDays + " 天),请分批同步,每次不超过 400 天");
+        }
+
+        // 3. 创建同步任务并启动异步执行
+        String taskId = generateTaskId();
+        SyncProgress progress = progressManager.createTask(taskId, startDate, endDate, (int) totalDays);
+
+        // 异步执行同步任务
+        LocalDate finalStart = start;
+        LocalDate finalEnd = end;
+        new Thread(() -> executeSyncTask(taskId, finalStart, finalEnd, progress, forceSync), "sync-task-" + taskId).start();
+
+        log.info("同步任务已创建: taskId={}, 日期范围: {} - {}, 共 {} 天, forceSync={}",
+                taskId, startDate, endDate, totalDays, forceSync);
+        return taskId;
+    }
+
+    /**
+     * 执行同步任务(在后台线程中)
+     */
+    private void executeSyncTask(String taskId, LocalDate start, LocalDate end, SyncProgress progress, boolean forceSync) {
+        SyncResult result = new SyncResult();
+        result.setStartDate(start.format(DATE_FMT));
+        result.setEndDate(end.format(DATE_FMT));
+        result.setTotalDays(progress.getTotalDays());
+
+        long startTime = System.currentTimeMillis();
+        int successDays = 0;
+        int skippedDays = 0;
+        AtomicInteger totalCount = new AtomicInteger(0);
+
+        // 用于限速:记录每分钟的请求次数
+        AtomicInteger requestCountInMinute = new AtomicInteger(0);
+        long minuteStartTime = startTime;
+
+        progressManager.updateTaskStatus(taskId, SyncProgress.SyncStatus.RUNNING, "同步开始...");
+
+        LocalDate current = start;
+        while (!current.isAfter(end)) {
+            String tradeDate = current.format(DATE_FMT);
+
+            try {
+                // 限速控制
+                long now = System.currentTimeMillis();
+                if (now - minuteStartTime >= 60000) {
+                    requestCountInMinute.set(0);
+                    minuteStartTime = now;
+                }
+                if (requestCountInMinute.get() >= MAX_REQUESTS_PER_MINUTE) {
+                    long waitMs = 60000 - (now - minuteStartTime);
+                    progressManager.updateTaskStatus(taskId, SyncProgress.SyncStatus.RUNNING,
+                            "达到频率限制,等待 " + (waitMs / 1000) + " 秒...");
+                    log.info("达到每分钟请求上限 {}, 等待 {} ms", MAX_REQUESTS_PER_MINUTE, waitMs);
+                    Thread.sleep(waitMs);
+                    requestCountInMinute.set(0);
+                    minuteStartTime = System.currentTimeMillis();
+                }
+
+                // 检查该交易日是否已同步过(forceSync=true 时跳过此检查,强制重新同步)
+                if (!forceSync && isTradeDateAlreadySynced(tradeDate)) {
+                    skippedDays++;
+                    progressManager.updateProgress(taskId, p -> {
+                        p.setProcessedDays(p.getProcessedDays() + 1);
+                        p.setSkippedDays(p.getSkippedDays() + 1);
+                        p.setCurrentDate(tradeDate);
+                        p.setMessage("跳过 " + tradeDate + "(已存在)");
+                    });
+                    current = current.plusDays(1);
+                    continue;
+                }
+
+                // 同步该交易日数据
+                requestCountInMinute.incrementAndGet();
+                progressManager.updateProgress(taskId, p -> {
+                    p.setCurrentDate(tradeDate);
+                    p.setMessage("正在同步 " + tradeDate + "...");
+                });
+
+                int count = syncDailyDataByTradeDateInternal(tradeDate);
+                successDays++;
+                totalCount.addAndGet(count);
+
+                progressManager.updateProgress(taskId, p -> {
+                    p.setProcessedDays(p.getProcessedDays() + 1);
+                    p.setSuccessDays(p.getSuccessDays() + 1);
+                    p.setTotalCount(p.getTotalCount() + count);
+                    p.setCurrentDate(tradeDate);
+                    p.setMessage("同步 " + tradeDate + " 完成,新增 " + count + " 条");
+                });
+
+                log.info("交易日 {} 同步完成, 新增 {} 条, 累计 {} 条", tradeDate, count, totalCount.get());
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                result.addFailedDate(tradeDate, "线程被中断: " + e.getMessage());
+                log.error("同步被中断,当前日期: {}", tradeDate, e);
+                progressManager.failTask(taskId, "同步被中断", e.getMessage());
+                return;
+            } catch (Exception e) {
+                result.addFailedDate(tradeDate, e.getMessage());
+                log.error("交易日 {} 同步失败", tradeDate, e);
+                progressManager.updateProgress(taskId, p -> {
+                    p.setProcessedDays(p.getProcessedDays() + 1);
+                    p.setFailedDays(p.getFailedDays() + 1);
+                    p.setCurrentDate(tradeDate);
+                    p.setMessage(tradeDate + " 同步失败: " + e.getMessage());
+                });
+            }
+
+            current = current.plusDays(1);
+        }
+
+        long elapsedMs = System.currentTimeMillis() - startTime;
+        result.setSuccessDays(successDays);
+        result.setSkippedDays(skippedDays);
+        result.setTotalCount(totalCount.get());
+        result.setElapsedMs(elapsedMs);
+
+        log.info("===== 按日期范围同步结束: {} =====", result.getSummary());
+
+        // 更新最终进度
+        if (result.isAllSuccess()) {
+            progressManager.completeTask(taskId, result.getSummary());
+        } else {
+            StringBuilder errorDetail = new StringBuilder();
+            for (SyncResult.FailedDate failed : result.getFailedDates()) {
+                errorDetail.append(failed.getTradeDate()).append(": ").append(failed.getReason()).append("\n");
+            }
+            progressManager.failTask(taskId, result.getSummary(), errorDetail.toString());
+        }
+    }
+
+    /**
+     * 生成任务 ID
+     */
+    private String generateTaskId() {
+        return "SYNC" + System.currentTimeMillis();
+    }
+
+    /**
+     * 判断某交易日是否已同步过(数据量达到阈值)
+     */
+    private boolean isTradeDateAlreadySynced(String tradeDate) {
+        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StockDailyData::getTradeDate, tradeDate);
+        Long count = stockDailyDataMapper.selectCount(wrapper);
+        return count != null && count >= SKIP_THRESHOLD;
+    }
+
+    /**
+     * 内部方法:同步指定交易日数据(不检查限速,由调用方控制)
+     */
+    private int syncDailyDataByTradeDateInternal(String tradeDate) {
         String fields = "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount";
+
+        TushareResponse response = tushareClient.call("daily", Map.of("trade_date", tradeDate), fields);
+
+        if (!response.isSuccess()) {
+            throw new RuntimeException("Tushare 接口返回失败: " + response.getMsg());
+        }
+
+        List<List<Object>> items = response.getData().getItems();
+        if (items == null || items.isEmpty()) {
+            log.warn("交易日 {} 无数据", tradeDate);
+            return 0;
+        }
+
+        List<String> fieldNames = response.getData().getFields();
+        int count = 0;
+        for (List<Object> item : items) {
+            try {
+                StockDailyData dailyData = parseDailyData(fieldNames, item);
+                upsertDailyData(dailyData);
+                count++;
+            } catch (Exception e) {
+                log.warn("保存日线数据失败: {}", item, e);
+            }
+        }
+
+        return count;
+    }
+
+    private int syncByDateRangeInBatches(LocalDate startDate, LocalDate endDate) {
         int totalCount = 0;
         int batchCount = 0;
         long startTime = System.currentTimeMillis();
 
-        LocalDate batchStart = startDate;
-        while (!batchStart.isAfter(endDate)) {
-            LocalDate batchEnd = batchStart.plusDays(30);
-            if (batchEnd.isAfter(endDate)) {
-                batchEnd = endDate;
-            }
-
-            String batchStartStr = batchStart.format(DATE_FMT);
-            String batchEndStr = batchEnd.format(DATE_FMT);
-
+        // 按交易日逐个同步,避免单次请求数据量超过 Tushare 接口上限
+        // (daily 接口不传 ts_code 时返回全市场数据,但单次调用有条数限制)
+        LocalDate current = startDate;
+        while (!current.isAfter(endDate)) {
+            String tradeDate = current.format(DATE_FMT);
             batchCount++;
-            log.info("同步批次 {}: {} - {}", batchCount, batchStartStr, batchEndStr);
+            log.info("同步交易日 {} (第 {} 个)", tradeDate, batchCount);
 
-            TushareResponse response = tushareClient.call("daily",
-                    Map.of("start_date", batchStartStr, "end_date", batchEndStr), fields);
+            int count = syncDailyDataByTradeDateInternal(tradeDate);
+            totalCount += count;
+            log.info("交易日 {} 完成, 保存 {} 条, 累计 {} 条", tradeDate, count, totalCount);
 
-            if (!response.isSuccess()) {
-                log.error("获取日线数据失败: {}", response.getMsg());
-                batchStart = batchEnd.plusDays(1);
-                continue;
-            }
-
-            List<String> fieldNames = response.getData().getFields();
-            List<List<Object>> items = response.getData().getItems();
-
-            if (items != null && !items.isEmpty()) {
-                int batchSaved = 0;
-                for (List<Object> item : items) {
-                    try {
-                        StockDailyData dailyData = parseDailyData(fieldNames, item);
-                        upsertDailyData(dailyData);
-                        batchSaved++;
-                    } catch (Exception e) {
-                        log.warn("保存日线数据失败: {}", item, e);
-                    }
-                }
-                totalCount += batchSaved;
-                log.info("批次 {} 完成, 保存 {} 条, 累计 {} 条", batchCount, batchSaved, totalCount);
-            } else {
-                log.warn("批次 {} 无数据", batchCount);
-            }
-
-            if (batchCount % 100 == 0) {
-                long elapsed = System.currentTimeMillis() - startTime;
-                double avgTime = elapsed / (double) batchCount;
-                long remainingBatches = (java.time.temporal.ChronoUnit.DAYS.between(batchStart, endDate) / 30) + 1;
-                long remainingTime = (long) (avgTime * remainingBatches / 1000 / 60);
-                log.info("进度: {}/约{} 批次, 已用 {}ms, 预计剩余约 {} 分钟", batchCount, batchCount + remainingBatches, elapsed, remainingTime);
-            }
-
-            batchStart = batchEnd.plusDays(1);
+            current = current.plusDays(1);
         }
 
         long totalTime = System.currentTimeMillis() - startTime;
-        log.info("智能增量同步所有股票完成, 共 {} 个批次, {} 条数据, 耗时 {} 秒", batchCount, totalCount, totalTime / 1000);
+        log.info("智能增量同步所有股票完成, 共 {} 个交易日, {} 条数据, 耗时 {} 秒", batchCount, totalCount, totalTime / 1000);
         return totalCount;
     }
 

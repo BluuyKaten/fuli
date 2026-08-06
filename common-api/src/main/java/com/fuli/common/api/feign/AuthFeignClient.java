@@ -19,4 +19,16 @@ public interface AuthFeignClient {
 
     @PutMapping("/auth/internal/resetCash")
     Result<Boolean> resetCash(@RequestParam("userId") Long userId, @RequestParam("newCash") BigDecimal newCash);
+
+    /**
+     * 扣除现金（买入时调用）
+     */
+    @PutMapping("/auth/internal/deductCash")
+    Result<Boolean> deductCash(@RequestParam("userId") Long userId, @RequestParam("amount") BigDecimal amount);
+
+    /**
+     * 增加现金（卖出时调用）
+     */
+    @PutMapping("/auth/internal/addCash")
+    Result<Boolean> addCash(@RequestParam("userId") Long userId, @RequestParam("amount") BigDecimal amount);
 }

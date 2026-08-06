@@ -5,12 +5,17 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '')
   const username = ref(localStorage.getItem('username') || '')
   const nickname = ref(localStorage.getItem('nickname') || '')
+  const userId = ref(Number(localStorage.getItem('userId') || '0'))
   const cash = ref(Number(localStorage.getItem('cash') || '0'))
 
-  const setToken = (newToken: string, name: string, nick: string, userCash?: number) => {
+  const setToken = (newToken: string, name: string, nick: string, uid?: number, userCash?: number) => {
     token.value = newToken
     username.value = name
     nickname.value = nick
+    if (uid !== undefined) {
+      userId.value = uid
+      localStorage.setItem('userId', String(uid))
+    }
     if (userCash !== undefined) {
       cash.value = userCash
       localStorage.setItem('cash', String(userCash))
@@ -29,12 +34,14 @@ export const useUserStore = defineStore('user', () => {
     token.value = ''
     username.value = ''
     nickname.value = ''
+    userId.value = 0
     cash.value = 0
     localStorage.removeItem('token')
     localStorage.removeItem('username')
     localStorage.removeItem('nickname')
+    localStorage.removeItem('userId')
     localStorage.removeItem('cash')
   }
 
-  return { token, username, nickname, cash, setToken, setCash, clearToken }
+  return { token, username, nickname, userId, cash, setToken, setCash, clearToken }
 })
