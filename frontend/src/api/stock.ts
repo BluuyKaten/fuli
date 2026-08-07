@@ -1,8 +1,8 @@
 import request from '@/utils/request'
-import type { StockInfo, StockDailyData, SyncStatusVO } from '@/types'
+import type { StockInfo, StockDailyData, SyncStatusVO, ApiResponse } from '@/types'
 
 export const searchStocks = (keyword: string) =>
-  request.get<any, { code: number; data: StockInfo[] }>('/stock/search', { params: { keyword } })
+  request.get<ApiResponse<StockInfo[]>>('/stock/search', { params: { keyword } })
 
 export const getStockInfo = (stockCode: string) =>
   request.get<any, { code: number; data: StockInfo }>('/stock/info', { params: { stockCode } })

@@ -52,30 +52,21 @@
       <!-- 中央：内容区 -->
       <main class="terminal-main">
         <!-- K 线图页面：使用 docking 面板 -->
-        <div v-if="isKlineRoute" class="dock-panels">
-          <div
-            v-for="panel in visiblePanels"
-            :key="panel.id"
-            class="dock-panel"
-          >
+        <div v-if="isKlineRoute && activePanel" class="dock-panels">
+          <div class="dock-panel">
             <div class="panel-header">
               <span class="panel-title">
-                <span v-if="panel.icon" class="panel-icon">{{ panel.icon }}</span>
-                {{ panel.title }}
+                <span v-if="activePanel.icon" class="panel-icon">{{ activePanel.icon }}</span>
+                {{ activePanel.title }}
               </span>
               <div class="panel-actions">
-                <span class="panel-btn" title="最小化" @click="minimizePanel(panel.id)">─</span>
-                <span class="panel-btn close-btn" title="关闭" @click="closePanel(panel.id)">✕</span>
+                <span class="panel-btn" title="最小化" @click="minimizePanel(activePanel.id)">─</span>
+                <span class="panel-btn close-btn" title="关闭" @click="closePanel(activePanel.id)">✕</span>
               </div>
             </div>
             <div class="panel-body">
-              <component :is="panel.component" />
+              <component :is="activePanel.component" />
             </div>
-          </div>
-          <!-- 兜底：没有可见面板时占位 -->
-          <div v-if="visiblePanels.length === 0" class="empty-main">
-            <div>所有面板已最小化或关闭</div>
-            <div class="empty-hint">从底部 dock 栏或左侧导航恢复</div>
           </div>
         </div>
 
@@ -122,7 +113,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { LockOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { useUserStore } from '@/stores/user'
@@ -140,6 +131,22 @@ const route = useRoute()
 
 // 仅在 K 线图路由显示 docking 面板
 const isKlineRoute = computed(() => route.name === 'KlineChart')
+
+// 当前激活的面板（只渲染这一个）
+const activePanel = computed(() => {
+  if (!isKlineRoute.value) return null
+  // K 线图路由默认显示 KlineChart 面板
+  const targetId = activePanelId.value
+  console.log('[BasicLayout] activePanelId:', targetId, 'visiblePanels:', visiblePanels.value.map(p => p.id))
+  const found = visiblePanels.value.find(p => p.id === targetId)
+  if (found) return found
+  // 如果不在可见面板中，找 KlineChart
+  const klinePanel = visiblePanels.value.find(p => p.id === 'KlineChart')
+  if (klinePanel) return klinePanel
+  // 否则返回第一个可见面板
+  return visiblePanels.value[0]
+})
+
 const userStore = useUserStore()
 const {
   visiblePanels,
@@ -157,6 +164,24 @@ let timer: number | null = null
 
 // 当前激活的面板（高亮用）
 const activePanelId = ref('Dashboard')
+
+// 监听路由变化，切换到对应面板
+watch(() => route.name, (name) => {
+  const nameMap: Record<string, string> = {
+    Dashboard: 'Dashboard',
+    TradeList: 'TradeList',
+    KlineChart: 'KlineChart',
+    StockSync: 'StockSync',
+    AccountProfile: 'AccountProfile'
+  }
+  const panelId = nameMap[name as string]
+  if (panelId) {
+    activePanelId.value = panelId
+    if (name === 'KlineChart') {
+      restorePanel('KlineChart')
+    }
+  }
+}, { immediate: true })
 
 const sideItems = [
   { key: 'Dashboard', label: '仪表盘', icon: '📊' },

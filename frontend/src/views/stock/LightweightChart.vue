@@ -15,10 +15,8 @@
 </template>
 
 <script setup lang="ts">
-console.log('[LightweightChart] script setup loaded')
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { createChart, CrosshairMode, ColorType, LineStyle, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
-import { SettingOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { useUserStore } from '@/stores/user'
 import {
@@ -26,7 +24,6 @@ import {
   getStockWeeklyData,
   getStockMonthlyData,
   getStockDailyData,
-  saveDrawing,
   loadDrawing
 } from '@/api/kline'
 import { toTushareCode } from '@/utils/stockCode'
@@ -67,8 +64,6 @@ const indicators = reactive({
   kdj: false
 })
 
-// 十字光标模式
-const crosshairMode = ref<'normal' | 'magnet'>('normal')
 
 // 图表相关
 const chartContainer = ref<HTMLElement | null>(null)
@@ -76,14 +71,6 @@ let chart: any = null
 let candleSeries: any = null
 let volumeSeries: any = null
 
-// 画线工具
-const drawingTools = [
-  { id: 'trend', name: '趋势线', icon: '╱' },
-  { id: 'horizontal', name: '水平线', icon: '─' },
-  { id: 'rectangle', name: '矩形', icon: '□' },
-  { id: 'fibonacci', name: '斐波那契', icon: '◆' }
-]
-const activeDrawing = ref<string | null>(null)
 
 // 画线数据
 interface DrawingPoint {
@@ -103,7 +90,6 @@ interface DrawingObject {
 
 const drawings = ref<DrawingObject[]>([])
 const currentDrawing = ref<DrawingObject | null>(null)
-const isDrawing = ref(false)
 const drawingCanvas = ref<HTMLCanvasElement | null>(null)
 let canvasCtx: CanvasRenderingContext2D | null = null
 
@@ -170,107 +156,6 @@ const drawObject = (obj: DrawingObject) => {
   ctx.stroke()
 }
 
-// 鼠标事件
-const onCanvasMouseDown = (e: MouseEvent) => {
-  if (!activeDrawing.value || !drawingCanvas.value) return
-  const rect = drawingCanvas.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-
-  isDrawing.value = true
-  currentDrawing.value = {
-    id: Date.now().toString(),
-    type: activeDrawing.value,
-    points: [{ x, y, price: getPriceFromY(y) }],
-    color: getToolColor(activeDrawing.value),
-    lineWidth: 2
-  }
-}
-
-const onCanvasMouseMove = (e: MouseEvent) => {
-  if (!isDrawing.value || !currentDrawing.value || !drawingCanvas.value) return
-  const rect = drawingCanvas.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-
-  if (currentDrawing.value.type === 'trend' || currentDrawing.value.type === 'fibonacci') {
-    // 第二个点
-    if (currentDrawing.value.points.length < 2) {
-      currentDrawing.value.points.push({ x, y, price: getPriceFromY(y) })
-    } else {
-      currentDrawing.value.points[1] = { x, y, price: getPriceFromY(y) }
-    }
-  } else if (currentDrawing.value.type === 'horizontal') {
-    // 水平线：跟随 Y
-    currentDrawing.value.points[0] = { x, y, price: getPriceFromY(y) }
-  } else if (currentDrawing.value.type === 'rectangle') {
-    if (currentDrawing.value.points.length < 2) {
-      currentDrawing.value.points.push({ x, y, price: getPriceFromY(y) })
-    } else {
-      currentDrawing.value.points[1] = { x, y, price: getPriceFromY(y) }
-    }
-  }
-
-  redrawDrawings()
-}
-
-const onCanvasMouseUp = () => {
-  if (!isDrawing.value || !currentDrawing.value) return
-  isDrawing.value = false
-  if (currentDrawing.value.points.length >= 1) {
-    drawings.value.push({ ...currentDrawing.value })
-  }
-  currentDrawing.value = null
-  redrawDrawings()
-}
-
-// 从 Y 坐标反算价格（近似）
-const getPriceFromY = (_y: number): number => {
-  if (!candleSeries || !chartContainer.value) return 0
-  // 简化：返回一个估算值（实际需要从图表 API 获取）
-  return 150.0
-}
-
-// 工具颜色
-const getToolColor = (toolId: string): string => {
-  const colors: Record<string, string> = {
-    trend: '#58a6ff',
-    horizontal: '#f85149',
-    rectangle: '#3fb950',
-    fibonacci: '#d29922'
-  }
-  return colors[toolId] || '#58a6ff'
-}
-
-// 激活画线工具
-const activateDrawing = (toolId: string) => {
-  activeDrawing.value = activeDrawing.value === toolId ? null : toolId
-  message.info(activeDrawing.value ? `已激活: ${drawingTools.find(t => t.id === toolId)?.name}` : '已取消画线')
-}
-
-// 清除画线
-const clearDrawings = () => {
-  drawings.value = []
-  redrawDrawings()
-  message.success('画线已清除')
-}
-
-// 保存画线到后端
-const saveDrawings = async () => {
-  if (!props.stockCode) return
-  try {
-    const userId = getCurrentUserId()
-    await saveDrawing({
-      userId,
-      stockCode: props.stockCode,
-      period: currentPeriod.value,
-      data: JSON.stringify(drawings.value)
-    })
-    message.success('画线已保存')
-  } catch (e: any) {
-    message.error(`保存失败: ${e.message}`)
-  }
-}
 
 // 加载画线
 const loadDrawings = async () => {
@@ -347,7 +232,7 @@ const initChart = () => {
 }
 
 onMounted(() => {
-  console.log('[LightweightChart] onMounted, stockCode:', props.stockCode)
+  if (!chartContainer.value) return
   initChart()
   initCanvas()
   loadData()
@@ -363,11 +248,7 @@ onBeforeUnmount(() => {
 
 // 加载 K 线数据
 const loadData = async () => {
-  console.log('[LightweightChart] loadData called, stockCode:', props.stockCode)
-  if (!props.stockCode) {
-    console.log('[LightweightChart] stockCode empty, return')
-    return
-  }
+  if (!props.stockCode) return
   try {
     let data: any[] = []
     const period = currentPeriod.value
@@ -376,9 +257,7 @@ const loadData = async () => {
 
     if (period === '1D') {
       // 日线（现有接口）
-      console.log('[LightweightChart] fetching daily data for:', tushareCode)
       const res = await getStockDailyData(tushareCode)
-      console.log('[LightweightChart] daily data response:', res)
       data = res.data || []
     } else if (['1', '5', '15', '60'].includes(period)) {
       // 分钟线
@@ -455,26 +334,6 @@ const changePeriod = (period: string) => {
   currentPeriod.value = period
   loadData()
   loadDrawings()
-}
-
-// 切换指标
-const toggleIndicator = (name: string, checked: boolean) => {
-  (indicators as any)[name] = checked
-  // 重新初始化图表
-  if (chart) {
-    chart.remove()
-    chart = null
-  }
-  initChart()
-  loadData()
-}
-
-// 切换十字光标模式
-const toggleCrosshair = () => {
-  crosshairMode.value = crosshairMode.value === 'normal' ? 'magnet' : 'normal'
-  chart.applyOptions({
-    crosshair: { mode: crosshairMode.value === 'normal' ? CrosshairMode.Normal : CrosshairMode.Magnet }
-  })
 }
 
 // 监听股票变化

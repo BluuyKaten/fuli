@@ -97,7 +97,7 @@ const userCash = ref(0)
 const submitting = ref(false)
 let userId = 0
 
-const price = computed(() => props.price || (form.tradePrice ? String(form.tradePrice) : ''))
+const price = computed(() => props.price || (form.tradePrice ? String(form.tradePrice) : ''));
 
 const tradeAmount = computed(() => {
   return (form.tradePrice || 0) * (form.tradeQuantity || 0)
@@ -160,7 +160,7 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     const res = await createTrade({
-      stockCode: form.stockCode,
+      stockCode: toTushareCode(form.stockCode),
       stockName: form.stockName,
       tradeType: form.tradeType,
       tradePrice: form.tradePrice,

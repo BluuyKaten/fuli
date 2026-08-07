@@ -81,10 +81,12 @@ const handleSearch = async (value: string) => {
   if (!value) { searchResults.value = []; return }
   try {
     const res = await searchStocks(value)
-    if (res.code === 200) {
-      searchResults.value = res.data.slice(0, 20)
+    if (res.data.code === 200) {
+      searchResults.value = res.data.data.slice(0, 20)
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('[WatchlistPanel] 搜索失败:', e)
+  }
 }
 
 const selectStock = async (stock: StockInfo) => {

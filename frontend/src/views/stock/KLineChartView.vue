@@ -111,8 +111,8 @@ const handleSearch = async (value: string) => {
   if (!value || value.length < 1) return
   try {
     const res = await searchStocks(value)
-    if (res.code === 200) {
-      searchOptions.value = res.data.map((item: StockInfo) => ({
+    if (res.data.code === 200) {
+      searchOptions.value = res.data.data.map((item: StockInfo) => ({
         ...item,
         value: item.stockCode,
         label: `${item.stockName} (${item.stockCode})`

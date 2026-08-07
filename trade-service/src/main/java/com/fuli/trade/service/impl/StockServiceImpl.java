@@ -83,6 +83,7 @@ public class StockServiceImpl implements StockService {
                 new LambdaQueryWrapper<PositionSummary>()
                         .eq(PositionSummary::getUserId, userId)
                         .eq(PositionSummary::getStockCode, stockCode)
+                        .eq(PositionSummary::getDeleted, 0)
         );
         return position != null ? position.getTotalQuantity() : 0;
     }

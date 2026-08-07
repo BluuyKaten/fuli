@@ -1,3 +1,11 @@
+/** 通用 API 响应 */
+export interface ApiResponse<T = unknown> {
+  code: number
+  message: string
+  data: T
+  timestamp?: number
+}
+
 /** 登录返回(对齐后端 LoginVO) */
 export interface LoginVO {
   token: string
