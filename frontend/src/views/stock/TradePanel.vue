@@ -137,7 +137,10 @@ const loadAvailableQuantity = async (stockCode: string) => {
     if (res.code === 200 && res.data) {
       availableQuantity.value = res.data.availableQuantity || 0
     }
-  } catch { availableQuantity.value = 0 }
+  } catch (e) {
+    console.error('[TradePanel] 加载可卖数量失败:', e)
+    availableQuantity.value = 0
+  }
 }
 
 const handleSubmit = async () => {

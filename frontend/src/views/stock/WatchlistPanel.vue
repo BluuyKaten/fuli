@@ -96,7 +96,9 @@ const selectStock = async (stock: StockInfo) => {
       // 同步到后端
       try {
         await addToWatchlist({ stockCode: pureCode, stockName: stock.stockName })
-      } catch { /* ignore */ }
+    } catch (e) {
+      console.error('[WatchlistPanel] 添加自选失败:', e)
+    }
     }
     keyword.value = ''
     searchResults.value = []
@@ -115,7 +117,8 @@ const loadWatchlist = async () => {
         market: item.market
       }))
     }
-  } catch {
+  } catch (e) {
+    console.error('[WatchlistPanel] 加载失败:', e)
     // 失败时使用默认
     watchlist.value = [
       { stockCode: '600519', stockName: '贵州茅台', industry: '白酒', market: '上海' },

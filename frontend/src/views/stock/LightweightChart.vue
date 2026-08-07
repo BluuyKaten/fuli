@@ -20,6 +20,7 @@ import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { createChart, CrosshairMode, ColorType, LineStyle, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
 import { SettingOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
+import { useUserStore } from '@/stores/user'
 import {
   getStockMinuteData,
   getStockWeeklyData,
@@ -37,6 +38,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'price-change', price: string): void
 }>()
+
+// 获取当前用户 ID
+const getCurrentUserId = () => {
+  if (typeof window !== 'undefined') {
+    const store = useUserStore()
+    if (store.userId) return store.userId
+  }
+  return Number(localStorage.getItem('userId') || '0')
+}
 
 // 周期选项
 const periods = [
@@ -249,7 +259,7 @@ const clearDrawings = () => {
 const saveDrawings = async () => {
   if (!props.stockCode) return
   try {
-    const userId = 1 // TODO: 从 store 获取
+    const userId = getCurrentUserId()
     await saveDrawing({
       userId,
       stockCode: props.stockCode,
@@ -266,7 +276,7 @@ const saveDrawings = async () => {
 const loadDrawings = async () => {
   if (!props.stockCode) return
   try {
-    const userId = 1 // TODO: 从 store 获取
+    const userId = getCurrentUserId()
     const res = await loadDrawing(userId, props.stockCode, currentPeriod.value)
     if (res.code === 200 && res.data?.data) {
       drawings.value = JSON.parse(res.data.data || '[]')

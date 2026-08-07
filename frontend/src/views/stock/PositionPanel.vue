@@ -63,7 +63,9 @@ const loadData = async () => {
       positions.value = res.data.positions || []
       cash.value = res.data.cash || 0
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('[PositionPanel] 加载失败:', e)
+  }
 }
 
 onMounted(loadData)

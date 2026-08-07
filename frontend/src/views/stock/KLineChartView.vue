@@ -118,7 +118,9 @@ const handleSearch = async (value: string) => {
         label: `${item.stockName} (${item.stockCode})`
       }))
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('[KLineChartView] 搜索失败:', e)
+  }
 }
 
 const handleSelectStock = async (value: string) => {
@@ -138,7 +140,10 @@ const loadCurrentPrice = async (stockCode: string) => {
       currentPrice.value = res.data.closePrice || ''
       emit('price-change', currentPrice.value)
     }
-  } catch { currentPrice.value = '' }
+  } catch (e) {
+    console.error('[KLineChartView] 加载当前价格失败:', e)
+    currentPrice.value = ''
+  }
 }
 
 const calculateMA = (dayCount: number, data: StockDailyData[]) => {
