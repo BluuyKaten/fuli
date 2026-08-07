@@ -34,7 +34,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'kline',
         name: 'KlineChart',
-        component: () => import('@/views/stock/KlineChart.vue'),
+        component: () => import('@/views/stock/KLinePage.vue'),
         meta: { title: 'K线图' }
       },
       {

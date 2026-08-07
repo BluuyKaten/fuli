@@ -126,6 +126,7 @@ export interface StockInfo {
   industry?: string
   market?: string
   listDate?: string
+  changePercent?: number  // 涨跌幅（%），运行时附加字段
 }
 
 /** 股票日线数据 */

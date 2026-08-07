@@ -44,9 +44,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { message } from 'ant-design-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { createTrade, type TradeRecord } from '@/api/trade'
+import { toTushareCode } from '@/utils/stockCode'
 
 const route = useRoute()
 const router = useRouter()
@@ -91,11 +92,12 @@ const onSubmit = async () => {
   await formRef.value.validate()
   const data: Partial<TradeRecord> = {
     ...formState,
+    stockCode: toTushareCode(formState.stockCode),
     tradeDate: formState.tradeDate?.format('YYYY-MM-DD') || ''
   }
   const res = await createTrade(data)
   if (res.code === 200) {
-    ElMessage.success('保存成功')
+    message.success('保存成功')
     goBack()
   }
 }

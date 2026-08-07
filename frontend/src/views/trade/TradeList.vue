@@ -49,9 +49,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { getTradePage, deleteTrade, type TradeRecord, type TradeQueryParams } from '@/api/trade'
+import { toTushareCode } from '@/utils/stockCode'
 
 const router = useRouter()
 const loading = ref(false)
@@ -88,7 +89,12 @@ const columns = [
 const loadData = async () => {
   loading.value = true
   try {
-    const params = { ...queryForm, pageNum: pagination.current, pageSize: pagination.pageSize }
+    const params = {
+      ...queryForm,
+      pageNum: pagination.current,
+      pageSize: pagination.pageSize,
+      stockCode: queryForm.stockCode ? toTushareCode(queryForm.stockCode) : ''
+    }
     if (dateRange.value) {
       params.startDate = dateRange.value[0].format('YYYY-MM-DD')
       params.endDate = dateRange.value[1].format('YYYY-MM-DD')
@@ -127,7 +133,7 @@ const handleEdit = (record: TradeRecord) => {
 const handleDelete = async (id: number) => {
   const res = await deleteTrade(id)
   if (res.code === 200) {
-    ElMessage.success('删除成功')
+    message.success('删除成功')
     loadData()
   }
 }

@@ -90,6 +90,12 @@
             <artifactId>common-api</artifactId>
         </dependency>
 
+        <!-- WebSocket (实时推送) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- Hutool -->
         <dependency>
             <groupId>cn.hutool</groupId>

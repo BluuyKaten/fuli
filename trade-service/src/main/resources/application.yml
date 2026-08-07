@@ -1,3 +1,12 @@
+server:
+  port: 8082
+
+spring.datasource:
+  driver-class-name: com.mysql.cj.jdbc.Driver
+  url: jdbc:mysql://127.0.0.1:3306/trade_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+  username: ${DB_USERNAME:root}
+  password: ${DB_PASSWORD:123456}
+
 spring:
   application:
     name: trade-service
@@ -10,15 +19,7 @@ spring:
         file-extension: yaml
       discovery:
         server-addr: ${NACOS_SERVER:127.0.0.1:8848}
-
-server:
-  port: 8082
-
-spring.datasource:
-  driver-class-name: com.mysql.cj.jdbc.Driver
-  url: jdbc:mysql://127.0.0.1:3306/trade_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
-  username: ${DB_USERNAME:root}
-  password: ${DB_PASSWORD:123456}
+  websocket: {}
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -33,3 +34,13 @@ fuli:
   #   reject  - 默认,资金查询失败时拒绝交易(防透支,推荐)
   #   allow   - 资金查询失败时允许交易(仅用于 auth-service 完全不可用的降级场景)
   cash-validation-fail-strategy: ${CASH_VALIDATION_FAIL_STRATEGY:reject}
+
+# 数据源配置
+datasource:
+  tushare:
+    token: ${TUSHARE_TOKEN:}
+    enabled: ${TUSHARE_ENABLED:true}
+    rate-limit: 1.0  # 次/秒（保守值，实际 80 次/分钟）
+  eastmoney:
+    enabled: ${EASTMONEY_ENABLED:true}
+    rate-limit: 0.2  # 次/秒

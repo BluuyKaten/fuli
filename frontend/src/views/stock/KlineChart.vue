@@ -65,7 +65,7 @@
          <a-table :columns="pointColumns" :data-source="selectedPoints" row-key="id" size="small" :pagination="false">
            <template #bodyCell="{ column, record }">
              <template v-if="column.key === 'type'">
-               <a-tag :color="record.type === 1 ? 'blue' : 'green'">{{ record.type === 1 ? '买入' : '卖出' }}</a-tag>
+               <a-tag :color="record.type === 1 ? 'cyan' : 'red'">{{ record.type === 1 ? '买入' : '卖出' }}</a-tag>
              </template>
              <template v-if="column.key === 'price'">
                <a-input-number v-model:value="record.price" :min="0.01" :step="0.01" :precision="2" size="small" style="width: 100px" />
@@ -97,7 +97,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
-import { ElMessage } from 'element-plus'
+import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { searchStocks, getStockDaily, getStockLatestPrice, getAvailableQuantity } from '@/api/stock'
 import { createTrade } from '@/api/trade'
@@ -109,9 +109,9 @@ import { BIZ_CODE_MESSAGE } from '@/utils/bizError'
 const showTradeError = (err: any) => {
   const code = err?.code
   if (code && BIZ_CODE_MESSAGE[code]) {
-    ElMessage.error(BIZ_CODE_MESSAGE[code] + (err?.message ? `: ${err.message}` : ''))
+    message.error(BIZ_CODE_MESSAGE[code] + (err?.message ? `: ${err.message}` : ''))
   } else {
-    ElMessage.error(err?.message || '保存失败')
+    message.error(err?.message || '保存失败')
   }
 }
 
@@ -369,6 +369,12 @@ const calculateKDJ = (data: any[], n = 9) => {
   return { k: kArr, d: dArr, j: jArr }
 }
 
+/**
+ * 配色：中国股市习惯，红涨绿跌
+ */
+const UP_COLOR = '#ef5350'   // 涨
+const DOWN_COLOR = '#26a69a' // 跌
+
 const updateMarkPoints = () => {
   if (!klineChart) return
   klineChart.setOption({
@@ -380,7 +386,7 @@ const updateMarkPoints = () => {
           name: p.type === 1 ? '买入' : '卖出',
           coord: [p.date, p.price],
           value: p.type === 1 ? '买' : '卖',
-          itemStyle: { color: p.type === 1 ? '#1677ff' : '#52c41a' }
+          itemStyle: { color: p.type === 1 ? '#26a69a' : '#ef5350' }
         }))
       }
     }]
@@ -466,10 +472,10 @@ const renderCharts = () => {
         type: 'candlestick',
         data: klineData,
         itemStyle: {
-          color: '#cf1322',
-          color0: '#3f8600',
-          borderColor: '#cf1322',
-          borderColor0: '#3f8600'
+          color: UP_COLOR,
+          color0: DOWN_COLOR,
+          borderColor: UP_COLOR,
+          borderColor0: DOWN_COLOR
         },
         markPoint: {
           symbol: 'pin',
@@ -478,7 +484,7 @@ const renderCharts = () => {
             name: p.type === 1 ? '买入' : '卖出',
             coord: [p.date, p.price],
             value: p.type === 1 ? '买' : '卖',
-            itemStyle: { color: p.type === 1 ? '#1677ff' : '#52c41a' }
+            itemStyle: { color: p.type === 1 ? '#26a69a' : '#ef5350' }
           }))
         }
       },
@@ -528,7 +534,7 @@ const renderCharts = () => {
         color: (params: any) => {
           const idx = params.dataIndex
           const d = dailyData.value[idx]
-          return Number(d.closePrice) >= Number(d.openPrice) ? '#cf1322' : '#3f8600'
+          return Number(d.closePrice) >= Number(d.openPrice) ? UP_COLOR : DOWN_COLOR
         }
       }
     }]
@@ -572,7 +578,7 @@ const renderCharts = () => {
         type: 'bar',
         data: macd,
         itemStyle: {
-          color: (params: any) => Number(params.data) >= 0 ? '#cf1322' : '#3f8600'
+          color: (params: any) => Number(params.data) >= 0 ? UP_COLOR : DOWN_COLOR
         }
       }
     ]
@@ -646,7 +652,7 @@ const downsample = (data: any[]) => {
 
 const loadData = async () => {
   if (!selectedStockCode.value) {
-    ElMessage.warning('请先选择股票')
+    message.warning('请先选择股票')
     return
   }
   loading.value = true
@@ -684,7 +690,7 @@ const saveTradePoints = async () => {
   if (sellPoints.length > 0) {
     const totalSellQuantity = sellPoints.reduce((sum, p) => sum + p.quantity, 0)
     if (totalSellQuantity > availableQuantity.value) {
-      ElMessage.error(`卖出数量超过可卖范围！本次卖出 ${totalSellQuantity} 股，当前可卖 ${availableQuantity.value} 股`)
+      message.error(`卖出数量超过可卖范围！本次卖出 ${totalSellQuantity} 股，当前可卖 ${availableQuantity.value} 股`)
       return
     }
   }
@@ -696,14 +702,14 @@ const saveTradePoints = async () => {
     for (const point of buyPoints) {
       const maxQty = Math.floor(userCash.value / point.price / 100) * 100
       if (point.quantity > maxQty) {
-        ElMessage.error(`${point.date} 买入数量超过可买范围！价格 ¥${point.price}，买入 ${point.quantity} 股，当前最多可买 ${maxQty.toLocaleString()} 股`)
+        message.error(`${point.date} 买入数量超过可买范围！价格 ¥${point.price}，买入 ${point.quantity} 股，当前最多可买 ${maxQty.toLocaleString()} 股`)
         return
       }
     }
     // 再校验买入总金额是否超过可用资金
     const totalBuyAmount = buyPoints.reduce((sum, p) => sum + p.price * p.quantity, 0)
     if (totalBuyAmount > userCash.value) {
-      ElMessage.error(`买入总金额超过可用资金！买入总额 ¥${totalBuyAmount.toLocaleString()}，当前可用现金 ¥${userCash.value.toLocaleString()}`)
+      message.error(`买入总金额超过可用资金！买入总额 ¥${totalBuyAmount.toLocaleString()}，当前可用现金 ¥${userCash.value.toLocaleString()}`)
       return
     }
   }
@@ -719,7 +725,7 @@ const saveTradePoints = async () => {
         tradeDate: point.date.substring(0, 4) + '-' + point.date.substring(4, 6) + '-' + point.date.substring(6, 8)
       })
     }
-    ElMessage.success(`成功保存 ${selectedPoints.value.length} 条交易记录`)
+    message.success(`成功保存 ${selectedPoints.value.length} 条交易记录`)
     selectedPoints.value = []
     updateMarkPoints()
     loadProfile()
