@@ -9,7 +9,7 @@
         placeholder="搜索股票添加"
         size="small"
         allow-clear
-        @change="onKeywordChange"
+        @input="onKeywordInput"
       />
     </div>
     <div class="watchlist-list">
@@ -69,7 +69,7 @@ const displayList = computed(() => {
 
 // 实时搜索（防抖）
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-const onKeywordChange = () => {
+const onKeywordInput = () => {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     handleSearch(keyword.value)
