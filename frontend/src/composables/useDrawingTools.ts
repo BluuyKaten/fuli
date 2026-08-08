@@ -159,10 +159,25 @@ export function useDrawingTools(
       case 'channel':
         if (pts.length >= 3) {
           ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y)
-          // 平行线通过 pts[2]
+          // 平行线通过 pts[2]，延伸到画布边缘
           const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y
           const px = pts[2].x, py = pts[2].y
-          ctx.moveTo(px, py); ctx.lineTo(px + dx, py + dy)
+          // 计算射线与画布边界的交点，取最大延伸
+          let tMin = -Infinity, tMax = Infinity
+          if (Math.abs(dx) > 1e-6) {
+            const t1 = (0 - px) / dx
+            const t2 = (canvas.width - px) / dx
+            tMin = Math.max(tMin, Math.min(t1, t2))
+            tMax = Math.min(tMax, Math.max(t1, t2))
+          }
+          if (Math.abs(dy) > 1e-6) {
+            const t1 = (0 - py) / dy
+            const t2 = (canvas.height - py) / dy
+            tMin = Math.max(tMin, Math.min(t1, t2))
+            tMax = Math.min(tMax, Math.max(t1, t2))
+          }
+          ctx.moveTo(px + dx * tMin, py + dy * tMin)
+          ctx.lineTo(px + dx * tMax, py + dy * tMax)
         }
         break
       case 'fibonacci':
@@ -170,11 +185,13 @@ export function useDrawingTools(
           const x1 = Math.min(pts[0].x, pts[1].x), x2 = Math.max(pts[0].x, pts[1].x)
           const y1 = pts[0].y, y2 = pts[1].y
           const diff = y2 - y1
-          for (const level of [0, 0.236, 0.382, 0.5, 0.618, 1]) {
-            const y = y1 + diff * level
-            ctx.moveTo(x1, y); ctx.lineTo(x2, y)
-            ctx.font = '10px monospace'
-            ctx.fillText(`${(level * 100).toFixed(1)}%`, x2 + 4, y + 3)
+          if (Math.abs(diff) > 1e-3) {
+            for (const level of [0, 0.236, 0.382, 0.5, 0.618, 1]) {
+              const y = y1 + diff * level
+              ctx.moveTo(x1, y); ctx.lineTo(x2, y)
+              ctx.font = '10px monospace'
+              ctx.fillText(`${(level * 100).toFixed(1)}%`, x2 + 4, y + 3)
+            }
           }
         }
         break
