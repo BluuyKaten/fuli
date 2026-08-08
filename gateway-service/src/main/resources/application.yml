@@ -19,25 +19,25 @@ spring:
           enabled: true
       routes:
         - id: auth-service
-          uri: lb://auth-service
+          uri: http://localhost:8081
           predicates:
             - Path=/api/auth/**,/api/watchlist/**
           filters:
             - StripPrefix=1
         - id: trade-service
-          uri: lb://trade-service
+          uri: http://localhost:8082
           predicates:
             - Path=/api/trade/**,/api/stock/**
           filters:
             - StripPrefix=1
         - id: analysis-service
-          uri: lb://analysis-service
+          uri: http://localhost:8083
           predicates:
             - Path=/api/analysis/**
           filters:
             - StripPrefix=1
         - id: data-service
-          uri: lb://data-service
+          uri: http://localhost:8084
           predicates:
             - Path=/api/data/**
           filters:

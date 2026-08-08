@@ -19,10 +19,9 @@ public class GatewayRouteConfig {
 
     /**
      * 路由配置。
-     * <p>
-     * 默认使用 {@code lb://服务名} 走 Nacos 服务发现 + 客户端负载均衡，适用于生产 / 多实例部署。
-     * 本地开发时可通过 {@code spring.profiles.active=local} 切换到 application-local.yml，
-     * 直连 localhost 各端口，避免多实例端口冲突。
+     *
+     * <p>默认使用 {@code http://localhost:8081/8082/...} 直连本地服务，
+     * 适用于开发环境。生产环境可配合 Nacos 替换为 {@code lb://服务名} 负载均衡。
      */
     @Bean
     public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
@@ -30,16 +29,16 @@ public class GatewayRouteConfig {
         return builder.routes()
                 .route("auth-service", r -> r.path("/api/auth/**", "/api/watchlist/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("lb://auth-service"))
+                        .uri("http://localhost:8081"))
                 .route("trade-service", r -> r.path("/api/trade/**", "/api/stock/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("lb://trade-service"))
+                        .uri("http://localhost:8082"))
                 .route("analysis-service", r -> r.path("/api/analysis/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("lb://analysis-service"))
+                        .uri("http://localhost:8083"))
                 .route("data-service", r -> r.path("/api/data/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("lb://data-service"))
+                        .uri("http://localhost:8084"))
                 .build();
     }
 }

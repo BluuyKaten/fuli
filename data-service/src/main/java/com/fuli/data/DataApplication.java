@@ -20,7 +20,7 @@ public class DataApplication {
 
     /** 同步任务线程池（替代裸 Thread） */
     @Bean
-    public TaskScheduler syncTaskScheduler() {
+    public ThreadPoolTaskScheduler syncTaskScheduler() {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(2);
         scheduler.setThreadNamePrefix("sync-task-");

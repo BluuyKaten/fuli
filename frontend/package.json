@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@vitejs/plugin-vue": "^5.2.1",
+    "bcryptjs": "^3.0.3",
     "typescript": "~5.7.2",
     "unplugin-auto-import": "^21.1.0",
     "unplugin-vue-components": "^0.28.0",
