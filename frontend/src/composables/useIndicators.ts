@@ -26,7 +26,7 @@ export interface IndicatorConfig {
 
 export function useIndicators(
   chart: Ref<IChartApi | null>,
-  theme: Ref<ChartTheme>
+  theme: Ref<ChartTheme> | Readonly<Ref<ChartTheme>>
 ) {
   // 当前启用的指标配置（默认启用 MA5/MA10/MACD）
   const activeIndicators = reactive<IndicatorConfig>({

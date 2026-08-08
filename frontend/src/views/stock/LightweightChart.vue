@@ -174,16 +174,19 @@ interface VolumeItem {
 const chartContainer = ref<HTMLElement | null>(null)
 const drawingCanvas = ref<HTMLCanvasElement | null>(null)
 
+// --- ResizeObserver ref（用于组件卸载时 disconnect） ---
+const resizeObserver = ref<ResizeObserver | null>(null)
+
 // --- 集成所有 composables ---
 const chartCore = useChartCore(chartContainer)
 const { chart, initChart, applyTheme, addCandlestickSeries, addHistogramSeries, destroyChart } = chartCore
 
 const { currentTheme, currentThemeName, toggleTheme: toggleThemeBase } = useChartTheme()
-const { activeIndicators, updateIndicators } = useIndicators(chart, currentTheme as any)
+const { activeIndicators, updateIndicators } = useIndicators(chart, currentTheme)
 
 // candleSeries ref：用于传递给 useTradeMarkers
 const candleSeries = ref<ISeriesApi<any> | null>(null)
-const { loadAutoMarkers } = useTradeMarkers(chart, candleSeries)
+const { loadAutoMarkers, addManualMarker } = useTradeMarkers(chart, candleSeries)
 
 const {
   currentTool, initCanvas, startDraw, addPoint,
@@ -197,7 +200,7 @@ const dailyData = ref<CandleItem[]>([])
 const { panelData, subscribeCrosshair, unsubscribeCrosshair } = useInfoPanel(
   chart,
   dailyData,
-  activeIndicators as IndicatorConfig
+  activeIndicators
 )
 
 // --- 周期选项 ---
@@ -297,15 +300,15 @@ const changePeriod = (period: string) => {
 }
 
 // --- 切换指标 ---
-const toggleIndicator = (key: string) => {
-  ;(activeIndicators as any)[key] = !(activeIndicators as any)[key]
+const toggleIndicator = (key: keyof IndicatorConfig) => {
+  activeIndicators[key] = !activeIndicators[key]
   refreshIndicators()
 }
 
 // --- 刷新指标渲染 ---
 const refreshIndicators = () => {
   if (dailyData.value.length > 0) {
-    updateIndicators(dailyData.value, activeIndicators as IndicatorConfig)
+    updateIndicators(dailyData.value, activeIndicators)
   }
 }
 
@@ -316,15 +319,26 @@ const toggleTheme = () => {
 
 // --- 画线工具 ---
 const startDrawTool = (tool: DrawingType) => {
-  if (currentTool.value === tool) {
-    // 再次点击取消当前工具
-    // useDrawingTools 不暴露 cancelDraw，通过 startDraw 重置
-  }
   startDraw(tool)
 }
 
-// --- Canvas 点击（画线） ---
+// --- Canvas 点击（画线 / 手动标记） ---
 const onCanvasClick = (e: MouseEvent) => {
+  // 手动买卖点标记模式
+  if (markerMode.value === 'buy' || markerMode.value === 'sell') {
+    if (!chart.value || !candleSeries.value || !drawingCanvas.value) return
+    const rect = drawingCanvas.value.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    // 将坐标转换为时间 / 价格
+    const time = chart.value.timeScale().coordinateToTime(x)
+    const price = candleSeries.value.coordinateToPrice(y)
+    if (time == null || price == null) return
+    addManualMarker(markerMode.value, time as string, price)
+    return
+  }
+
+  // 画线模式
   if (!currentTool.value || !drawingCanvas.value) return
   const rect = drawingCanvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
@@ -446,7 +460,7 @@ const initChartInstance = () => {
 
   // ResizeObserver：自适应容器大小
   if (chartContainer.value) {
-    const resizeObserver = new ResizeObserver(entries => {
+    resizeObserver.value = new ResizeObserver(entries => {
       if (entries.length === 0 || !entries[0].contentRect || !chart.value) return
       const { width, height } = entries[0].contentRect
       chart.value.applyOptions({ width, height })
@@ -457,7 +471,7 @@ const initChartInstance = () => {
         redraw()
       }
     })
-    resizeObserver.observe(chartContainer.value)
+    resizeObserver.value.observe(chartContainer.value)
   }
 }
 
@@ -527,6 +541,7 @@ onMounted(() => {
 
 // --- 生命周期：卸载 ---
 onBeforeUnmount(() => {
+  resizeObserver.value?.disconnect()
   unsubscribeCrosshair()
   destroyChart()
 })
