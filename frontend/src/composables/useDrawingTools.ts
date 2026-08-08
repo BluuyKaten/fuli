@@ -225,7 +225,6 @@ export function useDrawingTools(
   }
 
   // --- 监听图表平移/缩放，自动重绘 ---
-  let unsubscribeTimeScale: (() => void) | null = null
   let unsubscribeVisibleRange: (() => void) | null = null
 
   const subscribeChartMove = () => {
@@ -233,15 +232,11 @@ export function useDrawingTools(
     const timeScale = chart.value.timeScale()
     const onChartChange = () => redraw()
     timeScale.subscribeVisibleLogicalRangeChange(onChartChange)
-    chart.value.subscribeTimeScaleChange(onChartChange)
-    unsubscribeTimeScale = () => timeScale.unsubscribeVisibleLogicalRangeChange(onChartChange)
-    unsubscribeVisibleRange = () => chart.value?.unsubscribeTimeScaleChange(onChartChange)
+    unsubscribeVisibleRange = () => timeScale.unsubscribeVisibleLogicalRangeChange(onChartChange)
   }
 
   const unsubscribeChartMove = () => {
-    unsubscribeTimeScale?.()
     unsubscribeVisibleRange?.()
-    unsubscribeTimeScale = null
     unsubscribeVisibleRange = null
   }
 
