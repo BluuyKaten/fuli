@@ -1,5 +1,6 @@
 package com.fuli.analysis.service;
 
+import com.fuli.analysis.vo.DashboardVO;
 import com.fuli.common.api.dto.TradeQueryDTO;
 import com.fuli.common.api.feign.AuthFeignClient;
 import com.fuli.common.api.feign.TradeFeignClient;
@@ -28,8 +29,8 @@ public class DashboardService {
         this.authFeignClient = authFeignClient;
     }
 
-    public Map<String, Object> getDashboardData(Long userId) {
-        Map<String, Object> result = new HashMap<>();
+    public DashboardVO getDashboardData(Long userId) {
+        DashboardVO result = new DashboardVO();
 
         List<TradeVO> trades = getTradeList(userId);
         Map<String, List<TradeVO>> tradesByStock = trades.stream()
@@ -99,6 +100,12 @@ public class DashboardService {
 
         BigDecimal cashBalance = getUserCashBalance(userId);
 
+        // 资金查询失败时返回明确错误，而非静默兜底到默认资金（避免用户看到错误资产数字）
+        if (cashBalance == null) {
+            log.error("DashboardService: 查询用户现金失败 userId={}", userId);
+            return null;
+        }
+
         // 总资产 = 资金余额 + 总市值
         BigDecimal totalAssets = cashBalance.add(totalMarketValue);
 
@@ -111,12 +118,12 @@ public class DashboardService {
             profitPercentage = floatingProfitLoss.divide(totalCost, 4, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100));
         }
 
-        result.put("totalAssets", totalAssets.setScale(2, RoundingMode.HALF_UP));
-        result.put("profitPercentage", profitPercentage.setScale(2, RoundingMode.HALF_UP));
-        result.put("floatingProfitLoss", floatingProfitLoss.setScale(2, RoundingMode.HALF_UP));
-        result.put("totalMarketValue", totalMarketValue.setScale(2, RoundingMode.HALF_UP));
-        result.put("cashBalance", cashBalance.setScale(2, RoundingMode.HALF_UP));
-        result.put("positions", positions);
+        result.setTotalAssets(totalAssets.setScale(2, RoundingMode.HALF_UP));
+        result.setProfitPercentage(profitPercentage.setScale(2, RoundingMode.HALF_UP));
+        result.setFloatingProfitLoss(floatingProfitLoss.setScale(2, RoundingMode.HALF_UP));
+        result.setTotalMarketValue(totalMarketValue.setScale(2, RoundingMode.HALF_UP));
+        result.setCashBalance(cashBalance.setScale(2, RoundingMode.HALF_UP));
+        result.setPositions(positions);
 
         return result;
     }
@@ -176,7 +183,8 @@ public class DashboardService {
         if (result != null && result.getCode() == 200 && result.getData() != null) {
             return result.getData();
         }
-        return new BigDecimal("200000.00");
+        // 不再静默兜底到默认资金 200000，返回 null 由上层明确报错
+        return null;
     }
 
     private static class StockLatestPrice {

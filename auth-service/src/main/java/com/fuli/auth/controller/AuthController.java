@@ -6,6 +6,7 @@ import com.fuli.auth.service.IdempotentMessageService;
 import com.fuli.auth.service.UserService;
 import com.fuli.auth.util.JwtUtil;
 import com.fuli.common.api.Result;
+import com.fuli.common.api.config.InternalKeyProperties;
 import com.fuli.common.api.dto.LoginDTO;
 import com.fuli.common.api.vo.LoginVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,14 +35,17 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final HttpServletRequest request;
     private final IdempotentMessageService idempotentMessageService;
+    private final InternalKeyProperties internalKeyProperties;
 
     public AuthController(UserService userService, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
-                          HttpServletRequest request, IdempotentMessageService idempotentMessageService) {
+                          HttpServletRequest request, IdempotentMessageService idempotentMessageService,
+                          InternalKeyProperties internalKeyProperties) {
         this.userService = userService;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.request = request;
         this.idempotentMessageService = idempotentMessageService;
+        this.internalKeyProperties = internalKeyProperties;
     }
 
     private Long getCurrentUserId() {
@@ -199,6 +203,11 @@ public class AuthController {
 
     @PutMapping("/internal/resetCash")
     public Result<Boolean> resetCash(@RequestParam Long userId, @RequestParam BigDecimal newCash) {
+        // 高敏感操作：直接改写余额，仅允许在开发/测试环境使用
+        if (!internalKeyProperties.isAllowDangerousOperations()) {
+            log.warn("【安全】resetCash 已被配置禁止（fuli.allow-dangerous-operations=false），拒绝执行: userId={}", userId);
+            return Result.error("该操作已禁用，仅允许在开发/测试环境使用");
+        }
         User user = userService.getById(userId);
         if (user == null) {
             return Result.error("用户不存在");

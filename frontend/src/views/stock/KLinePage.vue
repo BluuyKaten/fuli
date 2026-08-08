@@ -106,7 +106,10 @@ const workspaceRef = ref<HTMLElement | null>(null)
 const chartRef = ref<InstanceType<typeof LightweightChart> | null>(null)
 const positionRef = ref<InstanceType<typeof PositionPanel> | null>(null)
 
-const activeStock = ref<StockInfo | null>({ stockCode: '600519', stockName: '贵州茅台' })
+// 默认展示股票（fallback）：用户未自选时展示此股票，便于新用户快速预览
+const DEFAULT_STOCK = { stockCode: '600519', stockName: '贵州茅台' }
+
+const activeStock = ref<StockInfo | null>({ ...DEFAULT_STOCK })
 const currentPrice = ref('')
 
 // 拖拽状态
@@ -179,10 +182,10 @@ const loadDefaultStock = async () => {
         stockName: first.stockName || first.stockCode
       }
     } else {
-      activeStock.value = { stockCode: '600519', stockName: '贵州茅台' }
+      activeStock.value = { ...DEFAULT_STOCK }
     }
   } catch {
-    activeStock.value = { stockCode: '600519', stockName: '贵州茅台' }
+    activeStock.value = { ...DEFAULT_STOCK }
   }
 }
 

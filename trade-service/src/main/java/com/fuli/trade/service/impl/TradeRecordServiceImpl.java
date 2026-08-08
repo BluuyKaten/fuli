@@ -71,6 +71,10 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createTrade(TradeDTO tradeDTO) {
+        // 注意：本方法使用最终一致性模型。
+        // 持仓更新与交易落库在同一本地事务，资金变动通过事件 + 本地消息表异步处理。
+        // 若消息发布/重试失败，资金会短暂不一致，最终由死信补偿恢复一致。
+
         // 1. 基础校验
         if (tradeDTO.getUserId() == null) {
             throw new BusinessException(400, "用户ID不能为空");
@@ -294,63 +298,62 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         statistics.setUserId(queryDTO.getUserId());
         statistics.setTotalTrades(records.size());
 
-        long buyCount = records.stream().filter(r -> TradeTypeEnum.BUY.getCode().equals(r.getTradeType())).count();
-        long sellCount = records.stream().filter(r -> TradeTypeEnum.SELL.getCode().equals(r.getTradeType())).count();
+        // 单次遍历统计所有指标，避免 10+ 次 stream 遍历
+        long buyCount = 0, sellCount = 0, winCount = 0, lossCount = 0;
+        BigDecimal totalBuyAmount = BigDecimal.ZERO;
+        BigDecimal totalSellAmount = BigDecimal.ZERO;
+        BigDecimal totalProfitLoss = BigDecimal.ZERO;
+        BigDecimal totalWinProfit = BigDecimal.ZERO;
+        BigDecimal totalLossAmount = BigDecimal.ZERO;
+        BigDecimal maxProfit = BigDecimal.ZERO;
+        BigDecimal maxLoss = BigDecimal.ZERO;
+
+        for (TradeRecord r : records) {
+            if (TradeTypeEnum.BUY.getCode().equals(r.getTradeType())) {
+                buyCount++;
+                totalBuyAmount = totalBuyAmount.add(r.getTotalCost());
+            } else {
+                sellCount++;
+                totalSellAmount = totalSellAmount.add(r.getTradeAmount());
+            }
+            if (r.getProfitLoss() != null) {
+                totalProfitLoss = totalProfitLoss.add(r.getProfitLoss());
+                if (TradeTypeEnum.SELL.getCode().equals(r.getTradeType())) {
+                    if (r.getProfitLoss().compareTo(BigDecimal.ZERO) > 0) {
+                        winCount++;
+                        totalWinProfit = totalWinProfit.add(r.getProfitLoss());
+                        if (r.getProfitLoss().compareTo(maxProfit) > 0) maxProfit = r.getProfitLoss();
+                    } else if (r.getProfitLoss().compareTo(BigDecimal.ZERO) < 0) {
+                        lossCount++;
+                        totalLossAmount = totalLossAmount.add(r.getProfitLoss());
+                        if (r.getProfitLoss().compareTo(maxLoss) < 0) maxLoss = r.getProfitLoss();
+                    }
+                }
+            }
+        }
+
         statistics.setBuyCount((int) buyCount);
         statistics.setSellCount((int) sellCount);
-
-        BigDecimal totalBuyAmount = records.stream()
-                .filter(r -> TradeTypeEnum.BUY.getCode().equals(r.getTradeType()))
-                .map(TradeRecord::getTotalCost)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
         statistics.setTotalBuyAmount(totalBuyAmount);
-
-        BigDecimal totalSellAmount = records.stream()
-                .filter(r -> TradeTypeEnum.SELL.getCode().equals(r.getTradeType()))
-                .map(TradeRecord::getTradeAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
         statistics.setTotalSellAmount(totalSellAmount);
-
-        BigDecimal totalProfitLoss = records.stream()
-                .filter(r -> r.getProfitLoss() != null)
-                .map(TradeRecord::getProfitLoss)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
         statistics.setTotalProfitLoss(totalProfitLoss);
 
-        List<TradeRecord> sellRecords = records.stream()
-                .filter(r -> TradeTypeEnum.SELL.getCode().equals(r.getTradeType()))
-                .filter(r -> r.getProfitLoss() != null)
-                .toList();
-
-        if (!sellRecords.isEmpty()) {
-            long winCount = sellRecords.stream().filter(r -> r.getProfitLoss().compareTo(BigDecimal.ZERO) > 0).count();
-            BigDecimal winRate = BigDecimal.valueOf(winCount).divide(BigDecimal.valueOf(sellRecords.size()), 4, RoundingMode.HALF_UP);
+        int totalSellWithProfit = (int) (winCount + lossCount);
+        if (totalSellWithProfit > 0) {
+            BigDecimal winRate = BigDecimal.valueOf(winCount).divide(BigDecimal.valueOf(totalSellWithProfit), 4, RoundingMode.HALF_UP);
             statistics.setWinRate(winRate);
 
-            BigDecimal avgProfit = sellRecords.stream()
-                    .filter(r -> r.getProfitLoss().compareTo(BigDecimal.ZERO) > 0)
-                    .map(TradeRecord::getProfitLoss)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add)
-                    .divide(BigDecimal.valueOf(Math.max(winCount, 1)), 4, RoundingMode.HALF_UP);
+            BigDecimal avgProfit = winCount > 0
+                    ? totalWinProfit.divide(BigDecimal.valueOf(winCount), 4, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
             statistics.setAvgProfit(avgProfit);
 
-            BigDecimal avgLoss = sellRecords.stream()
-                    .filter(r -> r.getProfitLoss().compareTo(BigDecimal.ZERO) < 0)
-                    .map(TradeRecord::getProfitLoss)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add)
-                    .divide(BigDecimal.valueOf(Math.max(sellRecords.size() - winCount, 1)), 4, RoundingMode.HALF_UP);
+            BigDecimal avgLoss = lossCount > 0
+                    ? totalLossAmount.divide(BigDecimal.valueOf(lossCount), 4, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
             statistics.setAvgLoss(avgLoss);
 
-            BigDecimal maxProfit = sellRecords.stream()
-                    .map(TradeRecord::getProfitLoss)
-                    .max(BigDecimal::compareTo)
-                    .orElse(BigDecimal.ZERO);
             statistics.setMaxProfit(maxProfit);
-
-            BigDecimal maxLoss = sellRecords.stream()
-                    .map(TradeRecord::getProfitLoss)
-                    .min(BigDecimal::compareTo)
-                    .orElse(BigDecimal.ZERO);
             statistics.setMaxLoss(maxLoss);
 
             if (avgLoss.compareTo(BigDecimal.ZERO) != 0) {

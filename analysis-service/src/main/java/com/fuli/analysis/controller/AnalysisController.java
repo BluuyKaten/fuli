@@ -1,10 +1,11 @@
 package com.fuli.analysis.controller;
 
+import com.fuli.analysis.service.AnalysisService;
+import com.fuli.analysis.service.DashboardService;
+import com.fuli.analysis.vo.DashboardVO;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.StatisticsVO;
-import com.fuli.analysis.service.AnalysisService;
-import com.fuli.analysis.service.DashboardService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -63,9 +64,12 @@ public class AnalysisController {
     }
 
     @GetMapping("/dashboard")
-    public Result<Map<String, Object>> dashboard() {
+    public Result<DashboardVO> dashboard() {
         Long userId = getCurrentUserId();
-        Map<String, Object> result = dashboardService.getDashboardData(userId);
+        DashboardVO result = dashboardService.getDashboardData(userId);
+        if (result == null) {
+            return Result.error("查询资金余额失败，请稍后重试");
+        }
         return Result.success(result);
     }
 }

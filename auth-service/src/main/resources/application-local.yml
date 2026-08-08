@@ -10,3 +10,5 @@ jwt:
 
 fuli:
   internal-key: dev-only-internal-key-0123456789
+  # 本地开发允许高敏感内部操作（如 resetCash），生产环境必须置为 false
+  allow-dangerous-operations: true

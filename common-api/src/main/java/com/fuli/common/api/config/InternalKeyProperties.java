@@ -25,6 +25,14 @@ public class InternalKeyProperties {
      */
     private String internalKey;
 
+    /**
+     * 是否允许高敏感内部操作（如 {@code resetCash} 直接改写余额）。
+     *
+     * <p>默认 {@code false}（生产环境禁用），仅本地开发/测试环境可置为 {@code true}。
+     * 配合 {@code application-local.yml} 使用，避免生产环境被直接操纵现金。
+     */
+    private boolean allowDangerousOperations = false;
+
     private static final String[] WEAK_DEFAULTS = {
             "fuli-stock-internal-2025-secure-key",
             "your-internal-key-here-change-me",
