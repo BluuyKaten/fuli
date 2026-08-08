@@ -146,6 +146,8 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                    <!-- 可执行 uber-jar 使用 exec classifier，保留普通 jar 供其他服务依赖 -->
+                    <classifier>exec</classifier>
                 </configuration>
             </plugin>
         </plugins>

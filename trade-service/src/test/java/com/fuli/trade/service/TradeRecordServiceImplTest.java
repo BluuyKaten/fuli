@@ -60,6 +60,8 @@ class TradeRecordServiceImplTest {
     private com.fuli.trade.service.LocalMessageService localMessageService;
     @MockitoBean
     private com.fuli.trade.service.LocalMessageRetryService localMessageRetryService;
+    @MockitoBean
+    private com.fuli.trade.service.CashChangeService cashChangeService;
 
     private static final Long USER_ID = 1L;
 

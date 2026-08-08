@@ -49,7 +49,7 @@
       </div>
 
       <div class="amount-display">
-        金额: <strong :style="{ color: form.tradeType === 1 ? '#58a6ff' : '#26a69a' }">¥{{ tradeAmount.toLocaleString() }}</strong>
+        金额: <strong :style="{ color: form.tradeType === 1 ? '#58a6ff' : '#26a69a' }">¥{{ fenToYuan(tradeAmountFen).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</strong>
       </div>
 
       <a-button
@@ -74,6 +74,7 @@ import { createTrade } from '@/api/trade'
 import { getProfile } from '@/api/auth'
 import type { StockInfo } from '@/types'
 import { toPureCode, toTushareCode } from '@/utils/stockCode'
+import { calcTradeAmountFen, calcMaxBuyQuantity, fenToYuan } from '@/utils/money'
 
 const props = defineProps<{
   stock: StockInfo | null
@@ -99,13 +100,14 @@ let userId = 0
 
 const price = computed(() => props.price || (form.tradePrice ? String(form.tradePrice) : ''));
 
-const tradeAmount = computed(() => {
-  return (form.tradePrice || 0) * (form.tradeQuantity || 0)
+// 金额（分）= 价格(分) × 数量，用整数计算避免浮点精度问题
+const tradeAmountFen = computed(() => {
+  return calcTradeAmountFen(form.tradePrice || 0, form.tradeQuantity || 0)
 })
 
+// 最大可买数量（100 的整数倍），用整数分计算
 const maxBuyQuantity = computed(() => {
-  if (!form.tradePrice || form.tradePrice <= 0 || userCash.value <= 0) return 0
-  return Math.max(0, Math.floor(userCash.value / form.tradePrice / 100) * 100)
+  return calcMaxBuyQuantity(userCash.value, form.tradePrice || 0)
 })
 
 // 股票变化时更新表单

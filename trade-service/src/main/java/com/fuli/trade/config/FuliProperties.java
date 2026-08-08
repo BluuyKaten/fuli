@@ -9,9 +9,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "fuli")
 public class FuliProperties {
 
-    /** 内部服务调用密钥 */
-    private String internalKey = "fuli-stock-internal-2025-secure-key";
-
     /**
      * 资金校验失败策略: reject(默认,拒绝交易) / allow(允许交易)
      */

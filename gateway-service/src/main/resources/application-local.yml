@@ -1,0 +1,41 @@
+# 本地开发 Profile
+# 使用方式：spring.profiles.active=local
+# 作用：将网关路由直连 localhost 各端口，避免本地多实例启动时端口冲突。
+# 生产环境不激活此 profile，使用默认的 lb:// 服务发现路由。
+
+# 本地开发 JWT 密钥（>= 32 字节），与 auth-service local profile 保持一致
+jwt:
+  secret: dev-only-jwt-secret-key-please-replace-in-production-0123456789
+
+# 本地开发内部服务密钥（>= 16 字节）
+fuli:
+  internal-key: dev-only-internal-key-0123456789
+
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: auth-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/auth/**,/api/watchlist/**
+          filters:
+            - StripPrefix=1
+        - id: trade-service
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/trade/**,/api/stock/**
+          filters:
+            - StripPrefix=1
+        - id: analysis-service
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/analysis/**
+          filters:
+            - StripPrefix=1
+        - id: data-service
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/data/**
+          filters:
+            - StripPrefix=1

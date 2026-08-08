@@ -28,8 +28,9 @@ mybatis-plus:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
 # 内部服务地址（Feign 调用用）
+# 生产环境必须通过环境变量 INTERNAL_KEY 注入强密钥（>= 16 字节）。
 fuli:
-  internal-key: ${INTERNAL_KEY:fuli-stock-internal-2025-secure-key}
+  internal-key: ${INTERNAL_KEY:}
   # 资金校验失败时的处理策略：
   #   reject  - 默认,资金查询失败时拒绝交易(防透支,推荐)
   #   allow   - 资金查询失败时允许交易(仅用于 auth-service 完全不可用的降级场景)

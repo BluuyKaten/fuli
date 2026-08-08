@@ -2,11 +2,13 @@ package com.fuli.trade.service.impl;
 
 import com.fuli.trade.entity.LocalMessage;
 import com.fuli.trade.mapper.LocalMessageMapper;
+import com.fuli.trade.service.DeadLetterNotifier;
 import com.fuli.trade.service.LocalMessageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,9 +17,13 @@ import java.util.UUID;
 public class LocalMessageServiceImpl implements LocalMessageService {
 
     private final LocalMessageMapper localMessageMapper;
+    private final List<DeadLetterNotifier> deadLetterNotifiers;
 
-    public LocalMessageServiceImpl(LocalMessageMapper localMessageMapper) {
+    public LocalMessageServiceImpl(LocalMessageMapper localMessageMapper,
+                                   List<DeadLetterNotifier> deadLetterNotifiers) {
         this.localMessageMapper = localMessageMapper;
+        // 若无告警器，使用空列表，避免 NPE
+        this.deadLetterNotifiers = deadLetterNotifiers != null ? deadLetterNotifiers : Collections.emptyList();
     }
 
     @Override
@@ -51,6 +57,8 @@ public class LocalMessageServiceImpl implements LocalMessageService {
             String deadLetterMsg = "超过最大重试次数(" + msg.getMaxRetry() + "): " + error;
             localMessageMapper.markDeadLetter(messageId, LocalMessage.STATUS_DEAD_LETTER, deadLetterMsg);
             log.error("消息进入死信队列: msgId={}, topic={}, retryCount={}", msg.getMsgId(), msg.getTopic(), newRetryCount);
+            // 触发死信告警通知（可插拔：日志 / webhook / 邮件等）
+            notifyDeadLetter(msg);
         } else {
             // 指数退避：1分钟、2分钟、4分钟...
             long delayMinutes = (long) Math.pow(2, newRetryCount - 1);
@@ -69,5 +77,17 @@ public class LocalMessageServiceImpl implements LocalMessageService {
                         .orderByAsc(LocalMessage::getNextRetryTime)
                         .last("LIMIT " + limit)
         );
+    }
+
+    /** 触发所有注册的死信告警通知器，单个通知器异常不影响其他 */
+    private void notifyDeadLetter(LocalMessage message) {
+        for (DeadLetterNotifier notifier : deadLetterNotifiers) {
+            try {
+                notifier.onDeadLetter(message);
+            } catch (Exception e) {
+                log.warn("死信告警通知器执行异常: notifier={}, error={}",
+                        notifier.getClass().getSimpleName(), e.getMessage());
+            }
+        }
     }
 }

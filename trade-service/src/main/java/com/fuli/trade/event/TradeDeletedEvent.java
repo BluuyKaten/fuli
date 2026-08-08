@@ -18,10 +18,12 @@ public class TradeDeletedEvent extends ApplicationEvent {
     private final String stockName;
     private final BigDecimal amount;
     private final Integer tradeQuantity;
+    /** 反向资金操作幂等键，避免与正向消息冲突 */
+    private final String msgId;
 
     public TradeDeletedEvent(Object source, Long tradeId, Long userId, Integer tradeType,
                              String stockCode, String stockName,
-                             BigDecimal amount, Integer tradeQuantity) {
+                             BigDecimal amount, Integer tradeQuantity, String msgId) {
         super(source);
         this.tradeId = tradeId;
         this.userId = userId;
@@ -30,5 +32,6 @@ public class TradeDeletedEvent extends ApplicationEvent {
         this.stockName = stockName;
         this.amount = amount;
         this.tradeQuantity = tradeQuantity;
+        this.msgId = msgId;
     }
 }

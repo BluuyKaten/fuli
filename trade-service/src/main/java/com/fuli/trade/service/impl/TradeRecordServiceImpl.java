@@ -12,6 +12,7 @@ import com.fuli.common.api.Result;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
 import com.fuli.trade.config.FuliProperties;
+import com.fuli.trade.dto.CashChangeMessage;
 import com.fuli.trade.entity.LocalMessage;
 import com.fuli.trade.entity.StockDailyData;
 import com.fuli.trade.entity.TradeRecord;
@@ -19,6 +20,7 @@ import com.fuli.trade.event.TradeCreatedEvent;
 import com.fuli.trade.event.TradeDeletedEvent;
 import com.fuli.trade.mapper.StockDailyDataMapper;
 import com.fuli.trade.mapper.TradeRecordMapper;
+import com.fuli.trade.service.CashChangeService;
 import com.fuli.trade.service.LocalMessageService;
 import com.fuli.trade.service.PositionSummaryService;
 import com.fuli.trade.service.TradeRecordService;
@@ -48,19 +50,22 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     private final StockDailyDataMapper stockDailyDataMapper;
     private final AuthFeignClient authFeignClient;
     private final FuliProperties fuliProperties;
+    private final CashChangeService cashChangeService;
 
     public TradeRecordServiceImpl(PositionSummaryService positionSummaryService,
                                   LocalMessageService localMessageService,
                                   ApplicationEventPublisher eventPublisher,
                                   StockDailyDataMapper stockDailyDataMapper,
                                   AuthFeignClient authFeignClient,
-                                  FuliProperties fuliProperties) {
+                                  FuliProperties fuliProperties,
+                                  CashChangeService cashChangeService) {
         this.positionSummaryService = positionSummaryService;
         this.localMessageService = localMessageService;
         this.eventPublisher = eventPublisher;
         this.stockDailyDataMapper = stockDailyDataMapper;
         this.authFeignClient = authFeignClient;
         this.fuliProperties = fuliProperties;
+        this.cashChangeService = cashChangeService;
     }
 
     @Override
@@ -154,8 +159,12 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         // 10. 写入本地消息表（用于跨服务事务最终一致性）
         String topic = TradeTypeEnum.SELL.getCode().equals(tradeDTO.getTradeType()) ? "TRADE_SELL" : "TRADE_BUY";
         String msgId = UUID.randomUUID().toString();
-        String payload = String.format("{\"userId\":%d,\"amount\":%s,\"msgId\":\"%s\"}",
-                tradeDTO.getUserId(), cashChangeAmount.toPlainString(), msgId);
+        String payload = cashChangeService.serializePayload(CashChangeMessage.builder()
+                .userId(tradeDTO.getUserId())
+                .amount(cashChangeAmount)
+                .msgId(msgId)
+                .direction(tradeDTO.getTradeType())
+                .build());
         LocalMessage message = localMessageService.createPendingMessage(msgId, topic, payload);
         if (tradeDTO.getRemark() != null && !tradeDTO.getRemark().isEmpty()) {
             record.setRemark(tradeDTO.getRemark() + " [msgId=" + msgId + "]");
@@ -190,7 +199,8 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean deleteTrade(Long id) {
-        return removeById(id);
+        // 所有删除统一走回滚逻辑，避免裸删除导致持仓与资金不一致
+        return deleteTradeWithRollback(id);
     }
 
     @Override
@@ -231,11 +241,12 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
                     trade.getStockName(), trade.getTradeQuantity(), trade.getTradePrice());
         }
 
-        // 2. 反向资金事件(事务提交后异步扣/入)
+        // 2. 反向资金事件（事务提交后异步扣/入），msgId 保证幂等且与正向消息隔离
+        String reverseMsgId = "REV-" + trade.getId() + "-" + trade.getTradeType() + "-" + UUID.randomUUID();
         eventPublisher.publishEvent(new TradeDeletedEvent(
                 this, trade.getId(), trade.getUserId(), trade.getTradeType(),
                 trade.getStockCode(), trade.getStockName(),
-                trade.getTotalCost(), trade.getTradeQuantity()));
+                trade.getTotalCost(), trade.getTradeQuantity(), reverseMsgId));
 
         // 3. 软删除交易记录
         boolean removed = removeById(id);

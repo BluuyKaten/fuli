@@ -27,6 +27,13 @@ import {
   loadDrawing
 } from '@/api/kline'
 import { toTushareCode } from '@/utils/stockCode'
+import type {
+  IChartApi,
+  ISeriesApi,
+  CandlestickData,
+  HistogramData,
+  UTCTimestamp
+} from 'lightweight-charts'
 
 const props = defineProps<{
   stockCode: string  // 纯数字 300750
@@ -43,6 +50,69 @@ const getCurrentUserId = () => {
     if (store.userId) return store.userId
   }
   return Number(localStorage.getItem('userId') || '0')
+}
+
+// K 线原始数据（后端返回，字段名可能不同）
+interface RawKlineItem {
+  time?: string | number
+  tradeDate?: string | number
+  open?: number
+  openPrice?: number
+  high?: number
+  highPrice?: number
+  low?: number
+  lowPrice?: number
+  close?: number
+  closePrice?: number
+  volume?: number
+  vol?: number
+}
+
+/** 统一 K 线数据格式（用于 Lightweight Charts） */
+interface CandleItem {
+  time: string | UTCTimestamp
+  open: number
+  high: number
+  low: number
+  close: number
+}
+
+/** 成交量数据格式 */
+interface VolumeItem {
+  time: string | UTCTimestamp
+  value: number
+  color: string
+}
+
+// 解析时间（返回 Lightweight Charts 格式）
+// 日线 → 'YYYY-MM-DD' 字符串；分钟线 → Unix 秒
+const parseTime = (t: string | number | undefined | null, isDaily: boolean): string | UTCTimestamp => {
+  if (!t && t !== 0) {
+    const now = new Date()
+    return isDaily ? now.toISOString().slice(0, 10) : Math.floor(now.getTime() / 1000) as UTCTimestamp
+  }
+  const s = String(t).trim()
+  // 8位数字格式：20200529 → 2020-05-29
+  if (/^\d{8}$/.test(s)) {
+    const formatted = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+    return isDaily ? formatted : Math.floor(new Date(formatted + 'T00:00:00+08:00').getTime() / 1000) as UTCTimestamp
+  }
+  // 已经是 YYYY-MM-DD 格式
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return isDaily ? s : Math.floor(new Date(s + 'T00:00:00+08:00').getTime() / 1000) as UTCTimestamp
+  }
+  // 带时间格式 2024-01-02 10:30
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const ts = new Date(s.replace(' ', 'T') + '+08:00').getTime()
+    return isDaily ? s.slice(0, 10) : Math.floor(ts / 1000) as UTCTimestamp
+  }
+  // 数字时间戳
+  const n = Number(s)
+  if (!isNaN(n)) {
+    return isDaily ? new Date(n > 1e12 ? n : n * 1000).toISOString().slice(0, 10)
+      : (n > 1e12 ? Math.floor(n / 1000) : n) as UTCTimestamp
+  }
+  return isDaily ? s : Math.floor(Date.now() / 1000) as UTCTimestamp
 }
 
 // 周期选项
@@ -65,11 +135,11 @@ const indicators = reactive({
 })
 
 
-// 图表相关
+// 图表相关（使用 lightweight-charts 强类型，替代 any）
 const chartContainer = ref<HTMLElement | null>(null)
-let chart: any = null
-let candleSeries: any = null
-let volumeSeries: any = null
+let chart: IChartApi | null = null
+let candleSeries: ISeriesApi<'Candlestick'> | null = null
+let volumeSeries: ISeriesApi<'Histogram'> | null = null
 
 
 // 画线数据
@@ -209,10 +279,13 @@ const initChart = () => {
   })
 
   if (indicators.volume) {
-    volumeSeries = chart.addSeries(HistogramSeries, {
+    volumeSeries = chart!.addSeries(HistogramSeries, {
       color: '#26a69a',
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
+      priceScaleId: 'volume'
+    })
+    // 成交量价格刻度上下留白（scaleMargins 属于 priceScale 配置）
+    chart!.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 }
     })
   }
@@ -220,7 +293,7 @@ const initChart = () => {
   const resizeObserver = new ResizeObserver(entries => {
     if (entries.length === 0 || !entries[0].contentRect) return
     const { width, height } = entries[0].contentRect
-    chart.applyOptions({ width, height })
+    chart!.applyOptions({ width, height })
     // 同步调整画布大小
     if (drawingCanvas.value) {
       drawingCanvas.value.width = width
@@ -250,7 +323,7 @@ onBeforeUnmount(() => {
 const loadData = async () => {
   if (!props.stockCode) return
   try {
-    let data: any[] = []
+    let data: RawKlineItem[] = []
     const period = currentPeriod.value
     // 统一转 Tushare 格式（300750 → 300750.SZ）
     const tushareCode = toTushareCode(props.stockCode)
@@ -271,61 +344,33 @@ const loadData = async () => {
       data = res.data || []
     }
 
-// 解析时间（返回 Lightweight Charts 格式）
-// 日线 → 'YYYY-MM-DD' 字符串；分钟线 → Unix 秒
-const parseTime = (t: any, isDaily: boolean): string | number => {
-  if (!t) {
-    const now = new Date()
-    return isDaily ? now.toISOString().slice(0, 10) : Math.floor(now.getTime() / 1000)
-  }
-  const s = String(t).trim()
-  // 8位数字格式：20200529 → 2020-05-29
-  if (/^\d{8}$/.test(s)) {
-    const formatted = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
-    return isDaily ? formatted : Math.floor(new Date(formatted + 'T00:00:00+08:00').getTime() / 1000)
-  }
-  // 已经是 YYYY-MM-DD 格式
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    return isDaily ? s : Math.floor(new Date(s + 'T00:00:00+08:00').getTime() / 1000)
-  }
-  // 带时间格式 2024-01-02 10:30
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    const ts = new Date(s.replace(' ', 'T') + '+08:00').getTime()
-    return isDaily ? s.slice(0, 10) : Math.floor(ts / 1000)
-  }
-  // 数字时间戳
-  const n = Number(s)
-  if (!isNaN(n)) {
-    return isDaily ? new Date(n > 1e12 ? n : n * 1000).toISOString().slice(0, 10) : (n > 1e12 ? Math.floor(n / 1000) : n)
-  }
-  return isDaily ? s : Math.floor(Date.now() / 1000)
-}
+    // 转换为 Lightweight Charts 格式
+    const isDaily = ['1D', '1W', '1M'].includes(currentPeriod.value)
+    const candles: CandleItem[] = data.map((d) => ({
+      time: parseTime(d.time ?? d.tradeDate, isDaily),
+      open: Number(d.open ?? d.openPrice ?? 0),
+      high: Number(d.high ?? d.highPrice ?? 0),
+      low: Number(d.low ?? d.lowPrice ?? 0),
+      close: Number(d.close ?? d.closePrice ?? 0)
+    }))
 
-// 转换为 Lightweight Charts 格式
-const isDaily = ['1D', '1W', '1M'].includes(currentPeriod.value)
-const candles = data.map((d: any) => ({
-  time: parseTime(d.time || d.tradeDate, isDaily) as any,
-  open: Number(d.open ?? d.openPrice ?? 0),
-  high: Number(d.high ?? d.highPrice ?? 0),
-  low: Number(d.low ?? d.lowPrice ?? 0),
-  close: Number(d.close ?? d.closePrice ?? 0)
-}))
+    const volumes: VolumeItem[] = data.map((d) => ({
+      time: parseTime(d.time ?? d.tradeDate, isDaily),
+      value: Number(d.volume ?? d.vol ?? 0),
+      color: Number(d.close ?? d.closePrice ?? 0) >= Number(d.open ?? d.openPrice ?? 0) ? '#ef535080' : '#26a69a80'
+    }))
 
-const volumes = data.map((d: any) => ({
-  time: parseTime(d.time || d.tradeDate, isDaily) as any,
-  value: Number(d.volume ?? d.vol ?? 0),
-  color: Number(d.close ?? d.closePrice ?? 0) >= Number(d.open ?? d.openPrice ?? 0) ? '#ef535080' : '#26a69a80'
-}))
-
-    candleSeries.setData(candles)
-    if (volumeSeries) volumeSeries.setData(volumes)
+    // 类型断言：Lightweight Charts 的 setData 接受特定类型
+    ;(candleSeries as ISeriesApi<'Candlestick'> | null)?.setData(candles as CandlestickData[])
+    ;(volumeSeries as ISeriesApi<'Histogram'> | null)?.setData(volumes as HistogramData[])
 
     // 最新价通知
     if (candles.length > 0) {
       emit('price-change', candles[candles.length - 1].close.toString())
     }
-  } catch (e: any) {
-    message.error(`加载K线数据失败: ${e.message}`)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '未知错误'
+    message.error(`加载K线数据失败: ${msg}`)
   }
 }
 

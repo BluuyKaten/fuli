@@ -17,25 +17,29 @@ public class GatewayRouteConfig {
         log.info("GatewayRouteConfig loaded!");
     }
 
+    /**
+     * 路由配置。
+     * <p>
+     * 默认使用 {@code lb://服务名} 走 Nacos 服务发现 + 客户端负载均衡，适用于生产 / 多实例部署。
+     * 本地开发时可通过 {@code spring.profiles.active=local} 切换到 application-local.yml，
+     * 直连 localhost 各端口，避免多实例端口冲突。
+     */
     @Bean
     public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
         log.info("Creating customRouteLocator bean");
         return builder.routes()
-                .route("auth-service", r -> r.path("/api/auth/**")
+                .route("auth-service", r -> r.path("/api/auth/**", "/api/watchlist/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8081"))
-                .route("trade-service", r -> r.path("/api/trade/**")
+                        .uri("lb://auth-service"))
+                .route("trade-service", r -> r.path("/api/trade/**", "/api/stock/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8082"))
+                        .uri("lb://trade-service"))
                 .route("analysis-service", r -> r.path("/api/analysis/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8083"))
-                .route("stock-service", r -> r.path("/api/stock/**")
-                        .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8082"))
+                        .uri("lb://analysis-service"))
                 .route("data-service", r -> r.path("/api/data/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8084"))
+                        .uri("lb://data-service"))
                 .build();
     }
 }

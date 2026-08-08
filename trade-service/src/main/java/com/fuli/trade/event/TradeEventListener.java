@@ -50,19 +50,19 @@ public class TradeEventListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleTradeDeleted(TradeDeletedEvent event) {
         try {
-            // 反向 msgId,避免与正向消息冲突
-            String reverseMsgId = "REV-" + event.getTradeId() + "-" + event.getTradeType();
+            // 事件自带反向 msgId，保证幂等且与正向消息隔离
             if (TradeTypeEnum.BUY.getCode().equals(event.getTradeType())) {
                 // 买入被删除 → 反向入账(退回资金)
-                cashChangeService.addCash(event.getUserId(), event.getAmount(), reverseMsgId);
+                cashChangeService.addCash(event.getUserId(), event.getAmount(), event.getMsgId());
             } else if (TradeTypeEnum.SELL.getCode().equals(event.getTradeType())) {
                 // 卖出被删除 → 反向扣款(收回资金)
-                cashChangeService.deductCash(event.getUserId(), event.getAmount(), reverseMsgId);
+                cashChangeService.deductCash(event.getUserId(), event.getAmount(), event.getMsgId());
             }
-            log.info("删除回滚资金变动成功: tradeId={}, type={}, amount={}",
-                    event.getTradeId(), event.getTradeType(), event.getAmount());
+            log.info("删除回滚资金变动成功: tradeId={}, type={}, amount={}, msgId={}",
+                    event.getTradeId(), event.getTradeType(), event.getAmount(), event.getMsgId());
         } catch (Exception e) {
-            log.error("删除回滚资金变动失败: tradeId={}, error={}", event.getTradeId(), e.getMessage());
+            log.error("删除回滚资金变动失败: tradeId={}, msgId={}, error={}",
+                    event.getTradeId(), event.getMsgId(), e.getMessage());
             throw e;
         }
     }

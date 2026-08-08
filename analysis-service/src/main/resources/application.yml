@@ -15,8 +15,9 @@ server:
   port: 8083
 
 # 内部服务调用密钥（用于 Feign 调用 auth-service 的 /internal/** 接口）
+# 生产环境必须通过环境变量 INTERNAL_KEY 注入强密钥（>= 16 字节）。
 fuli:
-  internal-key: ${INTERNAL_KEY:fuli-stock-internal-2025-secure-key}
+  internal-key: ${INTERNAL_KEY:}
 
 feign:
   client:

@@ -1,24 +1,34 @@
 package com.fuli.gateway.util;
 
+import com.fuli.common.api.config.JwtProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 
+/**
+ * JWT 工具类（gateway-service 端）。
+ *
+ * <p>密钥统一由 {@link JwtProperties} 注入，与 auth-service 端共用同一密钥，
+ * 消除双密钥漂移风险。
+ */
 @Slf4j
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.secret:default-secret-key-for-dev-only-please-change-in-production-32chars}")
-    private String secret;
+    private final JwtProperties jwtProperties;
+
+    /** @param jwtProperties 统一 JWT 密钥配置（来自 common-api） */
+    public JwtUtil(JwtProperties jwtProperties) {
+        this.jwtProperties = jwtProperties;
+    }
 
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        return Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
     public boolean validateToken(String token) {

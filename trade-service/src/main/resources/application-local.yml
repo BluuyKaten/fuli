@@ -1,0 +1,9 @@
+# 本地开发 Profile（trade-service）
+# 使用方式：spring.profiles.active=local
+#
+# 开发密钥仅用于本地，已通过启动校验（长度满足要求）。
+# 生产环境不激活此 profile，必须通过环境变量注入强密钥。
+
+fuli:
+  # 本地开发用随机密钥（>= 16 字节），请勿用于生产。
+  internal-key: dev-only-internal-key-0123456789

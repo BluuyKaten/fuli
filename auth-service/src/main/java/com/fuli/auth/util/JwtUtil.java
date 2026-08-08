@@ -1,10 +1,10 @@
 package com.fuli.auth.util;
 
+import com.fuli.common.api.config.JwtProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
@@ -13,18 +13,25 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * JWT 工具类（auth-service 端）。
+ *
+ * <p>密钥统一由 {@link JwtProperties} 注入，启动时会校验强度，
+ * 与 gateway-service 端共用同一密钥，消除双密钥漂移风险。
+ */
 @Slf4j
 @Component
 public class JwtUtil {
 
-    @Value("${jwt.secret:your-256-bit-secret-key-here-must-be-at-least-32-characters-long}")
-    private String secret;
+    private final JwtProperties jwtProperties;
 
-    @Value("${jwt.expiration:86400000}")
-    private Long expiration;
+    /** @param jwtProperties 统一 JWT 密钥配置（来自 common-api） */
+    public JwtUtil(JwtProperties jwtProperties) {
+        this.jwtProperties = jwtProperties;
+    }
 
     private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        return Keys.hmacShaKeyFor(jwtProperties.getSecret().getBytes(StandardCharsets.UTF_8));
     }
 
     public String generateToken(Long userId, String username) {
@@ -33,7 +40,7 @@ public class JwtUtil {
         claims.put("username", username);
 
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + expiration);
+        Date expiryDate = new Date(now.getTime() + jwtProperties.getExpiration());
 
         return Jwts.builder()
                 .claims(claims)

@@ -1,5 +1,7 @@
 package com.fuli.trade.service.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fuli.trade.dto.CashChangeMessage;
 import com.fuli.trade.entity.LocalMessage;
 import com.fuli.trade.service.CashChangeService;
 import com.fuli.trade.service.LocalMessageRetryService;
@@ -7,8 +9,6 @@ import com.fuli.trade.service.LocalMessageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
-import java.math.BigDecimal;
 
 /**
  * 本地消息重试服务（定时扫描并重试失败消息）
@@ -19,6 +19,7 @@ public class LocalMessageRetryServiceImpl implements LocalMessageRetryService {
 
     private final LocalMessageService localMessageService;
     private final CashChangeService cashChangeService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public LocalMessageRetryServiceImpl(LocalMessageService localMessageService,
                                        CashChangeService cashChangeService) {
@@ -55,70 +56,28 @@ public class LocalMessageRetryServiceImpl implements LocalMessageRetryService {
     }
 
     /**
-     * 根据 topic 解析 payload 并执行对应资金操作(带幂等 msgId)
+     * 解析 payload 为强类型并执行对应资金操作（带幂等 msgId）。
+     *
+     * <p>payload 使用 Jackson 反序列化为 {@link CashChangeMessage}，
+     * 消息自包含方向（direction），无需依赖 topic 判断。
      */
     private void processMessage(LocalMessage msg) {
         String payload = msg.getPayload();
         if (payload == null || payload.isEmpty()) {
             return;
         }
-        Long userId = extractLong(payload, "userId");
-        BigDecimal amount = extractBigDecimal(payload, "amount");
-        String msgId = extractString(payload, "msgId");
-        if (userId == null || amount == null) {
+        CashChangeMessage message;
+        try {
+            message = objectMapper.readValue(payload, CashChangeMessage.class);
+        } catch (Exception e) {
+            log.warn("消息 payload 解析失败: msgId={}, payload={}, error={}",
+                    msg.getMsgId(), payload, e.getMessage());
             return;
         }
-        if (msgId == null || msgId.isEmpty()) {
-            msgId = msg.getMsgId();
-        }
-
-        String topic = msg.getTopic();
-        if ("TRADE_BUY".equals(topic)) {
-            cashChangeService.deductCash(userId, amount, msgId);
-        } else if ("TRADE_SELL".equals(topic)) {
-            cashChangeService.addCash(userId, amount, msgId);
-        }
-    }
-
-    private Long extractLong(String json, String key) {
         try {
-            String search = "\"" + key + "\":";
-            int idx = json.indexOf(search);
-            if (idx < 0) return null;
-            int start = idx + search.length();
-            int end = json.indexOf(",", start);
-            if (end < 0) end = json.indexOf("}", start);
-            return Long.parseLong(json.substring(start, end).trim());
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private BigDecimal extractBigDecimal(String json, String key) {
-        try {
-            String search = "\"" + key + "\":";
-            int idx = json.indexOf(search);
-            if (idx < 0) return null;
-            int start = idx + search.length();
-            int end = json.indexOf(",", start);
-            if (end < 0) end = json.indexOf("}", start);
-            return new BigDecimal(json.substring(start, end).trim());
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String extractString(String json, String key) {
-        try {
-            String search = "\"" + key + "\":\"";
-            int idx = json.indexOf(search);
-            if (idx < 0) return null;
-            int start = idx + search.length();
-            int end = json.indexOf("\"", start);
-            if (end < 0) return null;
-            return json.substring(start, end);
-        } catch (Exception e) {
-            return null;
+            cashChangeService.processCashChange(message);
+        } catch (IllegalArgumentException e) {
+            log.warn("消息处理被拒绝: msgId={}, error={}", msg.getMsgId(), e.getMessage());
         }
     }
 }
