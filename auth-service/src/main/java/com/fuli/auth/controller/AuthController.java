@@ -203,8 +203,12 @@ public class AuthController {
         if (user == null) {
             return Result.error("用户不存在");
         }
+        BigDecimal oldCash = user.getCash();
         user.setCash(newCash);
         userService.updateById(user);
+        // 审计日志：记录现金重置操作（高风险操作）
+        log.warn("【审计】重置用户现金: userId={}, oldCash={}, newCash={}, operator=internal-api",
+                userId, oldCash, newCash);
         return Result.success("重置成功", true);
     }
 
