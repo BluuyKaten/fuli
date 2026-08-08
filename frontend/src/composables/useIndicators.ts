@@ -22,17 +22,16 @@ export interface IndicatorConfig {
   kdj: boolean
   rsi: boolean
   boll: boolean
-  volume: boolean
 }
 
 export function useIndicators(
   chart: Ref<IChartApi | null>,
   theme: Ref<ChartTheme>
 ) {
-  // 当前启用的指标配置（默认启用 MA5/MA10/MACD/成交量）
+  // 当前启用的指标配置（默认启用 MA5/MA10/MACD）
   const activeIndicators = reactive<IndicatorConfig>({
     ma5: true, ma10: true, ma20: false, ma60: false,
-    macd: true, kdj: false, rsi: false, boll: false, volume: true
+    macd: true, kdj: false, rsi: false, boll: false
   })
 
   // 管理所有指标系列的引用
@@ -60,6 +59,7 @@ export function useIndicators(
    * 根据配置更新所有指标系列
    * @param data K 线数据
    * @param config 指标配置
+   * @note 成交量系列不在指标管理范围内，由调用方通过 useChartCore.addHistogramSeries 直接控制
    */
   const updateIndicators = (data: CandleItem[], config: IndicatorConfig) => {
     if (!chart.value || data.length === 0) return
