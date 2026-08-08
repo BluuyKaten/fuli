@@ -191,7 +191,7 @@ const { loadAutoMarkers, addManualMarker } = useTradeMarkers(chart, candleSeries
 const {
   currentTool, initCanvas, startDraw, addPoint,
   loadDrawings, redraw
-} = useDrawingTools(chart, drawingCanvas)
+} = useDrawingTools(chart, drawingCanvas, candleSeries)
 
 const { exporting, exportPNG, exportCSV } = useChartExport(chartContainer)
 

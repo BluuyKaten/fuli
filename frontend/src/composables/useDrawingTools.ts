@@ -1,6 +1,6 @@
 // useDrawingTools.ts
 import { ref, type Ref } from 'vue'
-import type { IChartApi } from 'lightweight-charts'
+import type { IChartApi, ISeriesApi } from 'lightweight-charts'
 import { saveDrawing, loadDrawing } from '@/api/kline'
 
 export type DrawingType =
@@ -33,7 +33,8 @@ const TOOL_POINTS: Record<DrawingType, number> = {
 
 export function useDrawingTools(
   chart: Ref<IChartApi | null>,
-  drawingCanvas: Ref<HTMLCanvasElement | null>
+  drawingCanvas: Ref<HTMLCanvasElement | null>,
+  candleSeries: Ref<ISeriesApi<any> | null>
 ) {
   const drawings = ref<DrawingObject[]>([])
   const currentTool = ref<DrawingType | null>(null)
@@ -67,9 +68,8 @@ export function useDrawingTools(
   const addPoint = (x: number, y: number) => {
     if (!currentTool.value || !chart.value) return
     const timeScale = chart.value.timeScale()
-    const priceScale = chart.value.priceScale('right')
     const time = timeScale.coordinateToTime(x)
-    const price = priceScale?.coordinateToPrice(y)
+    const price = candleSeries.value?.coordinateToPrice(y)
     currentPoints.value.push({ x, y, time: time ?? undefined, price: price ?? undefined })
 
     if (currentPoints.value.length >= TOOL_POINTS[currentTool.value]) {
