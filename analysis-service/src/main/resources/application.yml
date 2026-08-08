@@ -5,11 +5,9 @@ spring:
     import: optional:nacos:${spring.application.name}.yaml?refresh=true
   cloud:
     nacos:
-      config:
-        server-addr: ${NACOS_SERVER:127.0.0.1:8848}
-        file-extension: yaml
       discovery:
         server-addr: ${NACOS_SERVER:127.0.0.1:8848}
+
 
 server:
   port: 8083

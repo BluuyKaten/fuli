@@ -11,3 +11,10 @@ jwt:
 fuli:
   # 本地开发用随机密钥（>= 16 字节），请勿用于生产。
   internal-key: dev-only-internal-key-0123456789
+
+# 暴露 actuator 端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
