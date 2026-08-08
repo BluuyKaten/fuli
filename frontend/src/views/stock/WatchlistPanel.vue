@@ -82,11 +82,10 @@ const handleSearch = async (value: string) => {
   if (!value) { searchResults.value = []; return }
   try {
     const res = await searchStocks(value)
-    console.log('[WatchlistPanel] 搜索响应:', res.data)
-    if (res.data && res.data.code === 200) {
-      searchResults.value = (res.data.data || []).slice(0, 20)
-      console.log('[WatchlistPanel] 搜索结果:', searchResults.value.length, '条')
-    }
+    // 兼容两种响应格式：{code:200, data:[...]} 或直接 [...]
+    const data = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+    searchResults.value = data.slice(0, 20)
+    console.log('[WatchlistPanel] 搜索结果:', searchResults.value.length, '条')
   } catch (e) {
     console.error('[WatchlistPanel] 搜索失败:', e)
   }
