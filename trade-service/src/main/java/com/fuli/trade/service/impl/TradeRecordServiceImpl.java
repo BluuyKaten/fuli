@@ -36,6 +36,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -476,9 +477,9 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     private BigDecimal getPreClosePrice(String stockCode, LocalDate tradeDate) {
         try {
             // 通过 data-service 获取最近的行情数据
-            var result = dataFeignClient.getLatestPrice(stockCode);
-            if (result != null && result.getCode() == 200 && result.getData() != null) {
-                Object preClose = result.getData().get("preClose");
+            Map<String, Object> data = dataFeignClient.getLatestPrice(stockCode);
+            if (data != null && !data.isEmpty()) {
+                Object preClose = data.get("preClose");
                 if (preClose != null) {
                     return new BigDecimal(preClose.toString());
                 }

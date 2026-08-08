@@ -130,10 +130,10 @@ public class AnalysisService {
             Map<LocalDate, BigDecimal> dailyPrices = new HashMap<>();
             try {
                 // 通过 data-service 获取日线数据
-                var result = dataFeignClient.getDailyData(stockCode,
+                List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode,
                         firstTradeDate.format(fmt), endDateActual.format(fmt));
-                if (result != null && result.getCode() == 200 && result.getData() != null) {
-                    for (Map<String, Object> item : result.getData()) {
+                if (result != null) {
+                    for (Map<String, Object> item : result) {
                         String tradeDateStr = (String) item.get("tradeDate");
                         Object closePriceObj = item.get("closePrice");
                         if (tradeDateStr != null && closePriceObj != null) {

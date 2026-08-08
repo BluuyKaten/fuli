@@ -33,41 +33,27 @@ public class StockServiceImpl implements StockService {
     }
 
     @Override
-    public Map<String, Object> searchStocks(String keyword) {
-        var result = dataFeignClient.searchStocks(keyword);
-        if (result != null && result.getCode() == 200 && result.getData() != null) {
-            Map<String, Object> response = new HashMap<>();
-            response.put("data", result.getData());
-            return response;
-        }
-        return new HashMap<>();
+    public List<Map<String, Object>> searchStocks(String keyword) {
+        List<Map<String, Object>> result = dataFeignClient.searchStocks(keyword);
+        return result != null ? result : new java.util.ArrayList<>();
     }
 
     @Override
     public List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate) {
-        var result = dataFeignClient.getDailyData(stockCode, startDate, endDate);
-        if (result != null && result.getCode() == 200 && result.getData() != null) {
-            return result.getData();
-        }
-        return new java.util.ArrayList<>();
+        List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode, startDate, endDate);
+        return result != null ? result : new java.util.ArrayList<>();
     }
 
     @Override
     public Map<String, Object> getStockInfo(String stockCode) {
-        var result = dataFeignClient.getStockInfo(stockCode);
-        if (result != null && result.getCode() == 200 && result.getData() != null) {
-            return result.getData();
-        }
-        return new HashMap<>();
+        Map<String, Object> result = dataFeignClient.getStockInfo(stockCode);
+        return result != null ? result : new HashMap<>();
     }
 
     @Override
     public Map<String, Object> getLatestPrice(String stockCode) {
-        var result = dataFeignClient.getLatestPrice(stockCode);
-        if (result != null && result.getCode() == 200 && result.getData() != null) {
-            return result.getData();
-        }
-        return new HashMap<>();
+        Map<String, Object> result = dataFeignClient.getLatestPrice(stockCode);
+        return result != null ? result : new HashMap<>();
     }
 
     @Override

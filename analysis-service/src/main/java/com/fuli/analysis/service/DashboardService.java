@@ -145,9 +145,8 @@ public class DashboardService {
     private StockLatestPrice getLatestPrice(String stockCode) {
         try {
             // 通过 data-service 获取行情（不再经过 trade-service 中转）
-            var result = dataFeignClient.getLatestPrice(stockCode);
-            if (result != null && result.getCode() == 200 && result.getData() != null) {
-                Map<String, Object> data = result.getData();
+            Map<String, Object> data = dataFeignClient.getLatestPrice(stockCode);
+            if (data != null && !data.isEmpty()) {
                 BigDecimal closePrice = data.get("closePrice") != null
                         ? new BigDecimal(data.get("closePrice").toString()) : BigDecimal.ZERO;
                 String tradeDateStr = data.get("tradeDate") != null ? data.get("tradeDate").toString() : null;
@@ -172,9 +171,9 @@ public class DashboardService {
         }
         // 通过 data-service 获取
         try {
-            var result = dataFeignClient.getStockInfo(stockCode);
-            if (result != null && result.getCode() == 200 && result.getData() != null) {
-                Object name = result.getData().get("stockName");
+            Map<String, Object> data = dataFeignClient.getStockInfo(stockCode);
+            if (data != null && !data.isEmpty()) {
+                Object name = data.get("stockName");
                 if (name != null) return name.toString();
             }
         } catch (Exception e) {

@@ -21,6 +21,8 @@ import java.util.Map;
  *
  * <p>trade-service / analysis-service 通过 {@code DataFeignClient} 调用此控制器获取行情数据，
  * 不再直接访问 data-service 的数据库表，消除服务边界耦合。
+ *
+ * <p>注意：为避 Result 双重嵌套（data.data），直接返回数据本身，由调用方 Feign 客户端的原生返回类型接收。
  */
 @Slf4j
 @RestController
@@ -39,21 +41,22 @@ public class StockDataController {
      * 搜索股票（按代码或名称模糊匹配）。
      */
     @GetMapping("/search")
-    public List<StockInfo> searchStocks(@RequestParam("keyword") String keyword) {
+    public List<Map<String, Object>> searchStocks(@RequestParam("keyword") String keyword) {
         QueryWrapper<StockInfo> wrapper = new QueryWrapper<>();
         wrapper.like("stock_code", keyword).or().like("stock_name", keyword);
         wrapper.orderByAsc("stock_code");
         wrapper.last("LIMIT 20");
-        return stockInfoMapper.selectList(wrapper);
+        List<StockInfo> stocks = stockInfoMapper.selectList(wrapper);
+        return stocks.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
     }
 
     /**
      * 获取股票日线行情。
      */
     @GetMapping("/daily")
-    public List<StockDailyData> getDailyData(@RequestParam("stockCode") String stockCode,
-                                             @RequestParam(value = "startDate", required = false) String startDate,
-                                             @RequestParam(value = "endDate", required = false) String endDate) {
+    public List<Map<String, Object>> getDailyData(@RequestParam("stockCode") String stockCode,
+                                                  @RequestParam(value = "startDate", required = false) String startDate,
+                                                  @RequestParam(value = "endDate", required = false) String endDate) {
         LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockDailyData::getStockCode, stockCode);
         if (startDate != null && !startDate.isEmpty()) {
@@ -63,15 +66,17 @@ public class StockDataController {
             wrapper.le(StockDailyData::getTradeDate, endDate);
         }
         wrapper.orderByAsc(StockDailyData::getTradeDate);
-        return stockDailyDataMapper.selectList(wrapper);
+        List<StockDailyData> dataList = stockDailyDataMapper.selectList(wrapper);
+        return dataList.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
     }
 
     /**
      * 获取股票基础信息。
      */
     @GetMapping("/info")
-    public StockInfo getStockInfo(@RequestParam("stockCode") String stockCode) {
-        return stockInfoMapper.selectById(stockCode);
+    public Map<String, Object> getStockInfo(@RequestParam("stockCode") String stockCode) {
+        StockInfo info = stockInfoMapper.selectById(stockCode);
+        return info != null ? toMap(info) : new HashMap<>();
     }
 
     /**
@@ -103,7 +108,7 @@ public class StockDataController {
         String[] codes = stockCodes.split(",");
         Map<String, Map<String, Object>> result = new HashMap<>();
         for (String code : codes) {
-            result.put(code, getLatestPrice(code.trim()));
+            result.put(code.trim(), getLatestPrice(code.trim()));
         }
         return result;
     }
@@ -112,15 +117,43 @@ public class StockDataController {
      * 批量获取股票基础信息，消除 N+1 查询。
      */
     @GetMapping("/infos")
-    public Map<String, StockInfo> getStockInfos(@RequestParam("stockCodes") String stockCodes) {
+    public Map<String, Map<String, Object>> getStockInfos(@RequestParam("stockCodes") String stockCodes) {
         String[] codes = stockCodes.split(",");
-        Map<String, StockInfo> result = new HashMap<>();
+        Map<String, Map<String, Object>> result = new HashMap<>();
         for (String code : codes) {
             StockInfo info = stockInfoMapper.selectById(code.trim());
             if (info != null) {
-                result.put(code.trim(), info);
+                result.put(code.trim(), toMap(info));
             }
         }
         return result;
+    }
+
+    private Map<String, Object> toMap(StockInfo info) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("stockCode", info.getStockCode());
+        map.put("stockName", info.getStockName());
+        map.put("area", info.getArea());
+        map.put("industry", info.getIndustry());
+        map.put("market", info.getMarket());
+        map.put("listDate", info.getListDate());
+        map.put("status", info.getStatus());
+        return map;
+    }
+
+    private Map<String, Object> toMap(StockDailyData data) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("stockCode", data.getStockCode());
+        map.put("tradeDate", data.getTradeDate());
+        map.put("openPrice", data.getOpenPrice());
+        map.put("highPrice", data.getHighPrice());
+        map.put("lowPrice", data.getLowPrice());
+        map.put("closePrice", data.getClosePrice());
+        map.put("preClose", data.getPreClose());
+        map.put("changeAmount", data.getChangeAmount());
+        map.put("pctChg", data.getPctChg());
+        map.put("vol", data.getVol());
+        map.put("amount", data.getAmount());
+        return map;
     }
 }

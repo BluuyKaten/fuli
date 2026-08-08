@@ -22,7 +22,7 @@ public class StockController {
     }
 
     @GetMapping("/search")
-    public Result<Map<String, Object>> search(@RequestParam String keyword) {
+    public Result<List<Map<String, Object>>> search(@RequestParam String keyword) {
         return Result.success(stockService.searchStocks(keyword));
     }
 

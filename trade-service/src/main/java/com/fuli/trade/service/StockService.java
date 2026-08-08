@@ -5,7 +5,7 @@ import java.util.Map;
 
 public interface StockService {
 
-    Map<String, Object> searchStocks(String keyword);
+    List<Map<String, Object>> searchStocks(String keyword);
 
     List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate);
 
