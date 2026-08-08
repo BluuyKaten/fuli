@@ -101,9 +101,26 @@ const loadProfile = async () => {
     const res = await getProfile()
     if (res.code === 200 && res.data) {
       Object.assign(profile, res.data)
+      // 计算累计投入（买入总额 - 卖出总额）
+      calculateInvestment()
     }
   } catch {
     message.error('加载账户信息失败')
+  }
+}
+
+const calculateInvestment = async () => {
+  try {
+    // 从交易记录计算累计投入
+    const { getStatistics } = await import('@/api/trade')
+    const res = await getStatistics({ userId: profile.id, pageNum: 1, pageSize: 1 })
+    if (res.code === 200 && res.data) {
+      // 累计投入 = 买入总额 - 卖出总额（净投入）
+      totalInvestment.value = Math.max(0, Number(res.data.totalBuyAmount || 0) - Number(res.data.totalSellAmount || 0))
+      totalProfitLoss.value = Number(res.data.totalProfitLoss || 0)
+    }
+  } catch {
+    // 计算失败时保持为 0
   }
 }
 
