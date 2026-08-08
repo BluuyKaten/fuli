@@ -14,16 +14,7 @@ import {
   HistogramSeries,
   LineSeries
 } from 'lightweight-charts'
-
-/** 图表主题配置（临时定义，Task 6 将迁移至 @/types/chart） */
-export interface ChartTheme {
-  name: string
-  layout: { background: string; textColor: string }
-  grid: { vertLines: string; horzLines: string }
-  candle: { upColor: string; downColor: string; borderUpColor: string; borderDownColor: string; wickUpColor: string; wickDownColor: string }
-  crosshair: string
-  indicators: Record<string, string>
-}
+import type { ChartTheme } from '@/types/chart'
 
 export function useChartCore(chartContainer: Ref<HTMLElement | null>) {
   // 图表实例
