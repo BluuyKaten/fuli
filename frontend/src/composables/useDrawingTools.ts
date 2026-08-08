@@ -44,6 +44,16 @@ export function useDrawingTools(
 
   const canvasCtx = ref<CanvasRenderingContext2D | null>(null)
 
+  // --- 坐标转换：time/price → 屏幕 x/y ---
+  const toScreen = (time: number | string | undefined, price: number | undefined): { x: number; y: number } => {
+    const c = chart.value
+    const s = candleSeries.value
+    if (!c || !s) return { x: 0, y: 0 }
+    const x = time != null ? c.timeScale().timeToCoordinate(time as any) ?? 0 : 0
+    const y = price != null ? s.priceToCoordinate(price) ?? 0 : 0
+    return { x, y }
+  }
+
   const initCanvas = () => {
     if (!drawingCanvas.value) return
     const rect = drawingCanvas.value.getBoundingClientRect()
@@ -111,7 +121,9 @@ export function useDrawingTools(
     ctx.lineWidth = obj.lineWidth
     ctx.setLineDash(obj.lineStyle === 'dashed' ? [6, 4] : obj.lineStyle === 'dotted' ? [2, 2] : [])
 
-    const pts = obj.points
+    // 将 time/price 转换为当前屏幕坐标
+    const pts = obj.points.map(p => toScreen(p.time, p.price))
+
     ctx.beginPath()
 
     switch (obj.type) {
@@ -121,7 +133,6 @@ export function useDrawingTools(
       case 'arrow':
         if (pts.length >= 2) {
           ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y)
-          // 箭头
           const angle = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x)
           const headLen = 10
           ctx.moveTo(pts[1].x, pts[1].y)
@@ -130,14 +141,20 @@ export function useDrawingTools(
           ctx.lineTo(pts[1].x - headLen * Math.cos(angle + Math.PI / 6), pts[1].y - headLen * Math.sin(angle + Math.PI / 6))
         }
         break
-      case 'horizontal':
-        ctx.moveTo(0, pts[0].y); ctx.lineTo(canvas.width, pts[0].y)
+      case 'horizontal': {
+        // 水平线：用 price 决定 y，贯穿整个画布宽度
+        const { y } = toScreen(obj.points[0].time, obj.points[0].price)
+        ctx.moveTo(0, y); ctx.lineTo(canvas.width, y)
         ctx.font = '11px monospace'
-        ctx.fillText(pts[0].price?.toFixed(2) || '', 10, pts[0].y - 4)
+        ctx.fillText(obj.points[0].price?.toFixed(2) || '', 10, y - 4)
         break
-      case 'vertical':
-        ctx.moveTo(pts[0].x, 0); ctx.lineTo(pts[0].x, canvas.height)
+      }
+      case 'vertical': {
+        // 垂直线：用 time 决定 x，贯穿整个画布高度
+        const { x } = toScreen(obj.points[0].time, obj.points[0].price)
+        ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height)
         break
+      }
       case 'ray':
         if (pts.length >= 2) {
           const dx = pts[1].x - pts[0].x
@@ -159,10 +176,8 @@ export function useDrawingTools(
       case 'channel':
         if (pts.length >= 3) {
           ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y)
-          // 平行线通过 pts[2]，延伸到画布边缘
           const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y
           const px = pts[2].x, py = pts[2].y
-          // 计算射线与画布边界的交点，取最大延伸
           let tMin = -Infinity, tMax = Infinity
           if (Math.abs(dx) > 1e-6) {
             const t1 = (0 - px) / dx
@@ -201,6 +216,27 @@ export function useDrawingTools(
         break
     }
     ctx.stroke()
+  }
+
+  // --- 监听图表平移/缩放，自动重绘 ---
+  let unsubscribeTimeScale: (() => void) | null = null
+  let unsubscribeVisibleRange: (() => void) | null = null
+
+  const subscribeChartMove = () => {
+    if (!chart.value) return
+    const timeScale = chart.value.timeScale()
+    const onChartChange = () => redraw()
+    timeScale.subscribeVisibleLogicalRangeChange(onChartChange)
+    chart.value.subscribeTimeScaleChange(onChartChange)
+    unsubscribeTimeScale = () => timeScale.unsubscribeVisibleLogicalRangeChange(onChartChange)
+    unsubscribeVisibleRange = () => chart.value?.unsubscribeTimeScaleChange(onChartChange)
+  }
+
+  const unsubscribeChartMove = () => {
+    unsubscribeTimeScale?.()
+    unsubscribeVisibleRange?.()
+    unsubscribeTimeScale = null
+    unsubscribeVisibleRange = null
   }
 
   // --- 持久化 ---
@@ -250,6 +286,8 @@ export function useDrawingTools(
     clearDrawings,
     saveDrawings,
     loadDrawings,
-    redraw
+    redraw,
+    subscribeChartMove,
+    unsubscribeChartMove
   }
 }

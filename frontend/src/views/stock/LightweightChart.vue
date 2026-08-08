@@ -190,7 +190,7 @@ const { loadAutoMarkers, addManualMarker } = useTradeMarkers(chart, candleSeries
 
 const {
   currentTool, initCanvas, startDraw, addPoint,
-  loadDrawings, redraw
+  loadDrawings, redraw, subscribeChartMove, unsubscribeChartMove
 } = useDrawingTools(chart, drawingCanvas, candleSeries)
 
 const { exporting, exportPNG, exportCSV } = useChartExport(chartContainer)
@@ -532,6 +532,7 @@ onMounted(() => {
   initChartInstance()
   initCanvas()
   subscribeCrosshair()
+  subscribeChartMove()
 
   // 加载数据
   loadData()
@@ -543,6 +544,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver.value?.disconnect()
   unsubscribeCrosshair()
+  unsubscribeChartMove()
   destroyChart()
 })
 </script>
