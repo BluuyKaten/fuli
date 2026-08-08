@@ -3,6 +3,10 @@ import { calcBOLL } from '../boll'
 
 describe('calcBOLL', () => {
   const data = Array.from({ length: 30 }, (_, i) => ({
+    time: `2024-01-${String(i + 1).padStart(2, '0')}`,
+    open: 10 + Math.sin(i) * 2,
+    high: 12 + Math.sin(i) * 2,
+    low: 8 + Math.sin(i) * 2,
     close: 10 + Math.sin(i) * 2
   }))
 

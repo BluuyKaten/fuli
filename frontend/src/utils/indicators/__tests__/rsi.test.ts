@@ -2,7 +2,13 @@
 import { calcRSI } from '../rsi'
 
 describe('calcRSI', () => {
-  const data = Array.from({ length: 20 }, (_, i) => ({ close: 10 + (i % 3 === 0 ? 1 : -0.5) }))
+  const data = Array.from({ length: 20 }, (_, i) => ({
+    time: `2024-01-${String(i + 1).padStart(2, '0')}`,
+    open: 10 + i,
+    high: 12 + i,
+    low: 8 + i,
+    close: 10 + (i % 3 === 0 ? 1 : -0.5)
+  }))
 
   test('返回数组长度与输入一致', () => {
     const result = calcRSI(data, 14)

@@ -3,6 +3,7 @@ import { calcKDJ } from '../kdj'
 
 describe('calcKDJ', () => {
   const data = Array.from({ length: 20 }, (_, i) => ({
+    time: `2024-01-${String(i + 1).padStart(2, '0')}`,
     open: 10 + i, high: 12 + i, low: 8 + i, close: 11 + i
   }))
 
