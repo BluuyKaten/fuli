@@ -82,6 +82,51 @@ public class StockController {
     }
 
     /**
+     * 批量获取股票最新行情（消除 N+1 查询）
+     */
+    @GetMapping("/latest-prices")
+    public Result<Map<String, Map<String, Object>>> latestPrices(@RequestParam String stockCodes) {
+        Map<String, Map<String, Object>> result = new HashMap<>();
+        for (String code : stockCodes.split(",")) {
+            String trimmed = code.trim();
+            if (trimmed.isEmpty()) continue;
+            StockDailyData latest = stockService.getLatestPrice(trimmed);
+            if (latest != null) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("stockCode", latest.getStockCode());
+                map.put("tradeDate", latest.getTradeDate());
+                map.put("closePrice", latest.getClosePrice());
+                map.put("preClose", latest.getPreClose());
+                result.put(trimmed, map);
+            }
+        }
+        return Result.success(result);
+    }
+
+    /**
+     * 批量获取股票基础信息（消除 N+1 查询）
+     */
+    @GetMapping("/infos")
+    public Result<Map<String, Map<String, Object>>> infos(@RequestParam String stockCodes) {
+        Map<String, Map<String, Object>> result = new HashMap<>();
+        for (String code : stockCodes.split(",")) {
+            String trimmed = code.trim();
+            if (trimmed.isEmpty()) continue;
+            StockInfo stockInfo = stockService.getStockInfo(trimmed);
+            if (stockInfo != null) {
+                Map<String, Object> map = new HashMap<>();
+                map.put("stockCode", stockInfo.getStockCode());
+                map.put("stockName", stockInfo.getStockName());
+                map.put("area", stockInfo.getArea());
+                map.put("industry", stockInfo.getIndustry());
+                map.put("market", stockInfo.getMarket());
+                result.put(trimmed, map);
+            }
+        }
+        return Result.success(result);
+    }
+
+    /**
      * 查询当前用户对某只股票的持仓数量（供 K 线图卖出时显示）
      */
     @GetMapping("/holding")

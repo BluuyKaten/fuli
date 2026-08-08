@@ -70,10 +70,17 @@ public class JwtGlobalFilter implements GlobalFilter, Ordered {
         return -100;
     }
 
+    /**
+     * 白名单路径（精确匹配前缀，避免 startsWith 绕过）。
+     * 例如 /api/auth/login 放行，但 /api/auth/loginxxx 不放行。
+     */
     private boolean isWhiteList(String path) {
-        return path.startsWith("/api/auth/login")
-                || path.startsWith("/api/auth/register")
-                || path.startsWith("/api/auth/captcha")
+        return path.equals("/api/auth/login")
+                || path.equals("/api/auth/register")
+                || path.equals("/api/auth/captcha")
+                || path.startsWith("/api/auth/login/")
+                || path.startsWith("/api/auth/register/")
+                || path.startsWith("/api/auth/captcha/")
                 || path.startsWith("/actuator/");
     }
 

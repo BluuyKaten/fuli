@@ -6,6 +6,7 @@ import com.fuli.trade.entity.StockInfo;
 import com.fuli.trade.mapper.StockDailyDataMapper;
 import com.fuli.trade.mapper.StockInfoMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +15,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,6 +40,7 @@ public class TushareSyncServiceImpl implements TushareSyncService {
     private final StockInfoMapper stockInfoMapper;
     private final StockDailyDataMapper stockDailyDataMapper;
     private final SyncProgressManager progressManager;
+    private final ThreadPoolTaskScheduler syncTaskScheduler;
 
     /** 最近一次同步结果(用于失败重试) */
     private volatile SyncResult lastSyncResult;
@@ -45,11 +48,13 @@ public class TushareSyncServiceImpl implements TushareSyncService {
     public TushareSyncServiceImpl(TushareClient tushareClient,
                                   StockInfoMapper stockInfoMapper,
                                   StockDailyDataMapper stockDailyDataMapper,
-                                  SyncProgressManager progressManager) {
+                                  SyncProgressManager progressManager,
+                                  ThreadPoolTaskScheduler syncTaskScheduler) {
         this.tushareClient = tushareClient;
         this.stockInfoMapper = stockInfoMapper;
         this.stockDailyDataMapper = stockDailyDataMapper;
         this.progressManager = progressManager;
+        this.syncTaskScheduler = syncTaskScheduler;
     }
 
     @Override
@@ -277,10 +282,12 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         String taskId = generateTaskId();
         SyncProgress progress = progressManager.createTask(taskId, startDate, endDate, (int) totalDays);
 
-        // 异步执行同步任务
+        // 异步执行同步任务（使用 TaskScheduler 线程池，替代裸 Thread）
         LocalDate finalStart = start;
         LocalDate finalEnd = end;
-        new Thread(() -> executeSyncTask(taskId, finalStart, finalEnd, progress, forceSync), "sync-task-" + taskId).start();
+        CompletableFuture.runAsync(
+                () -> executeSyncTask(taskId, finalStart, finalEnd, progress, forceSync),
+                syncTaskScheduler);
 
         log.info("同步任务已创建: taskId={}, 日期范围: {} - {}, 共 {} 天, forceSync={}",
                 taskId, startDate, endDate, totalDays, forceSync);

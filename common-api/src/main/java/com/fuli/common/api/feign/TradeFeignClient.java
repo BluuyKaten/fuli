@@ -56,4 +56,20 @@ public interface TradeFeignClient {
     Result<List<Map<String, Object>>> getStockDaily(@RequestParam("stockCode") String stockCode,
                                                      @RequestParam(value = "startDate", required = false) String startDate,
                                                      @RequestParam(value = "endDate", required = false) String endDate);
+
+    /**
+     * 批量获取股票最新行情（含收盘价、前收盘价），消除 N+1 查询。
+     * @param stockCodes 股票代码列表（逗号分隔）
+     * @return key=stockCode, value=行情数据 Map
+     */
+    @GetMapping("/stock/latest-prices")
+    Result<Map<String, Map<String, Object>>> getLatestPrices(@RequestParam("stockCodes") String stockCodes);
+
+    /**
+     * 批量获取股票基础信息，消除 N+1 查询。
+     * @param stockCodes 股票代码列表（逗号分隔）
+     * @return key=stockCode, value=股票信息 Map
+     */
+    @GetMapping("/stock/infos")
+    Result<Map<String, Map<String, Object>>> getStockInfos(@RequestParam("stockCodes") String stockCodes);
 }
