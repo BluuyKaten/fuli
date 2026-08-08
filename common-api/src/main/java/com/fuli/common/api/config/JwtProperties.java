@@ -3,7 +3,6 @@ package com.fuli.common.api.config;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
 /**
  * JWT 密钥统一配置。
@@ -13,9 +12,11 @@ import org.springframework.stereotype.Component;
  *
  * <p>启动时会校验密钥强度：长度 {@code >= 32} 且不是已知弱默认值，
  * 不满足则直接启动失败，避免生产环境使用弱密钥运行。
+ *
+ * <p>通过 {@code JwtAutoConfiguration} 按需注册：仅当配置了 {@code jwt.secret} 时才生效，
+ * 避免不依赖 JWT 的服务（如 data-service）被强制要求配置。
  */
 @Data
-@Component
 @ConfigurationProperties(prefix = "jwt")
 public class JwtProperties {
 

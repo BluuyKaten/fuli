@@ -27,10 +27,11 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
-# 内部服务地址（Feign 调用用）
+# 内部服务调用密钥（用于 Feign 调用 auth-service 的 /internal/** 接口）
 # 生产环境必须通过环境变量 INTERNAL_KEY 注入强密钥（>= 16 字节）。
+# 本地开发可激活 local profile 使用开发密钥（见 application-local.yml）。
+# 此处不配置 fuli.internal-key，避免空默认值导致启动校验失败。
 fuli:
-  internal-key: ${INTERNAL_KEY:}
   # 资金校验失败时的处理策略：
   #   reject  - 默认,资金查询失败时拒绝交易(防透支,推荐)
   #   allow   - 资金查询失败时允许交易(仅用于 auth-service 完全不可用的降级场景)

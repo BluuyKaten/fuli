@@ -14,8 +14,8 @@ server:
 
 # 内部服务调用密钥（用于 Feign 调用 auth-service 的 /internal/** 接口）
 # 生产环境必须通过环境变量 INTERNAL_KEY 注入强密钥（>= 16 字节）。
-fuli:
-  internal-key: ${INTERNAL_KEY:}
+# 本地开发可激活 local profile 使用开发密钥（见 application-local.yml）。
+# 此处不配置 fuli.internal-key，避免空默认值导致启动校验失败。
 
 feign:
   client:

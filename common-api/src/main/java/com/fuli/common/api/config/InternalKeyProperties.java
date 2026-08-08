@@ -3,7 +3,6 @@ package com.fuli.common.api.config;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.stereotype.Component;
 
 /**
  * 内部服务调用密钥统一配置。
@@ -13,9 +12,11 @@ import org.springframework.stereotype.Component;
  *
  * <p>启动时会校验密钥强度：长度 {@code >= 16} 且不是已知弱默认值，
  * 不满足则直接启动失败。
+ *
+ * <p>通过 {@code InternalKeyAutoConfiguration} 按需注册：仅当配置了 {@code fuli.internal-key} 时才生效，
+ * 避免不依赖内部服务调用的服务被强制要求配置。
  */
 @Data
-@Component
 @ConfigurationProperties(prefix = "fuli")
 public class InternalKeyProperties {
 

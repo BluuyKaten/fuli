@@ -1,1 +1,2 @@
-com.fuli.common.api.config.CommonLibConfig
+com.fuli.common.api.config.JwtAutoConfiguration
+com.fuli.common.api.config.InternalKeyAutoConfiguration
