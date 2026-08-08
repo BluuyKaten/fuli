@@ -40,6 +40,7 @@ export function useDrawingTools(
   const currentTool = ref<DrawingType | null>(null)
   const currentPoints = ref<DrawingPoint[]>([])
   const isDrawing = ref(false)
+  const selectedId = ref<string | null>(null)
   const DEFAULT_COLOR = '#58a6ff'
 
   const canvasCtx = ref<CanvasRenderingContext2D | null>(null)
@@ -52,6 +53,46 @@ export function useDrawingTools(
     const x = time != null ? c.timeScale().timeToCoordinate(time as any) ?? 0 : 0
     const y = price != null ? s.priceToCoordinate(price) ?? 0 : 0
     return { x, y }
+  }
+
+  // --- 点击命中检测：判断点是否在某条画线附近 ---
+  const HIT_RADIUS = 8 // 命中半径（像素）
+
+  const hitTest = (x: number, y: number): DrawingObject | null => {
+    for (const d of drawings.value) {
+      if (!d.visible) continue
+      const pts = d.points.map(p => toScreen(p.time, p.price))
+      // 检查是否靠近任一控制点
+      for (const pt of pts) {
+        if (Math.hypot(pt.x - x, pt.y - y) < HIT_RADIUS) return d
+      }
+      // 检查是否靠近线段（端点之间的连线）
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (distToSegment(x, y, pts[i], pts[i + 1]) < HIT_RADIUS) return d
+      }
+    }
+    return null
+  }
+
+  const distToSegment = (px: number, py: number, a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const dx = b.x - a.x, dy = b.y - a.y
+    const lenSq = dx * dx + dy * dy
+    if (lenSq === 0) return Math.hypot(px - a.x, py - a.y)
+    let t = ((px - a.x) * dx + (py - a.y) * dy) / lenSq
+    t = Math.max(0, Math.min(1, t))
+    return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy))
+  }
+
+  const selectDrawing = (x: number, y: number): boolean => {
+    const hit = hitTest(x, y)
+    selectedId.value = hit ? hit.id : null
+    redraw()
+    return hit !== null
+  }
+
+  const clearSelection = () => {
+    selectedId.value = null
+    redraw()
   }
 
   const initCanvas = () => {
@@ -116,12 +157,39 @@ export function useDrawingTools(
       if (!ctx || !canvas) return
       ctx.clearRect(0, 0, canvas.width, canvas.height)
       for (const d of drawings.value) {
-        if (d.visible) drawObject(ctx, d, canvas)
+        if (d.visible) drawObject(ctx, d, canvas, d.id === selectedId.value)
+      }
+      // 绘制当前正在画的控制点
+      if (isDrawing.value) {
+        drawPreviewPoints(ctx)
       }
     })
   }
 
-  const drawObject = (ctx: CanvasRenderingContext2D, obj: DrawingObject, canvas: HTMLCanvasElement) => {
+  // --- 绘制控制点标记 ---
+  const drawControlPoints = (ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) => {
+    ctx.save()
+    for (const p of pts) {
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
+      ctx.fillStyle = '#ffffff'
+      ctx.fill()
+      ctx.strokeStyle = '#58a6ff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  // --- 绘制预览中的控制点（正在画时）---
+  const drawPreviewPoints = (ctx: CanvasRenderingContext2D) => {
+    const pts = currentPoints.value.map(p => ({ x: p.x, y: p.y }))
+    if (pts.length > 0) {
+      drawControlPoints(ctx, pts)
+    }
+  }
+
+  const drawObject = (ctx: CanvasRenderingContext2D, obj: DrawingObject, canvas: HTMLCanvasElement, showPoints: boolean) => {
     ctx.strokeStyle = obj.color
     ctx.fillStyle = obj.color
     ctx.lineWidth = obj.lineWidth
@@ -222,6 +290,11 @@ export function useDrawingTools(
         break
     }
     ctx.stroke()
+
+    // 选中时绘制控制点
+    if (showPoints) {
+      drawControlPoints(ctx, pts)
+    }
   }
 
   // --- 监听图表平移/缩放，自动重绘 ---
@@ -279,10 +352,13 @@ export function useDrawingTools(
     drawings,
     currentTool,
     isDrawing,
+    selectedId,
     initCanvas,
     startDraw,
     cancelDraw,
     addPoint,
+    selectDrawing,
+    clearSelection,
     deleteDrawing,
     clearDrawings,
     saveDrawings,

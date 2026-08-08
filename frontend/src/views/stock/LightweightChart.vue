@@ -190,6 +190,7 @@ const { loadAutoMarkers, addManualMarker } = useTradeMarkers(chart, candleSeries
 
 const {
   currentTool, initCanvas, startDraw, addPoint,
+  selectDrawing,
   loadDrawings, redraw, subscribeChartMove, unsubscribeChartMove
 } = useDrawingTools(chart, drawingCanvas, candleSeries)
 
@@ -322,15 +323,16 @@ const startDrawTool = (tool: DrawingType) => {
   startDraw(tool)
 }
 
-// --- Canvas 点击（画线 / 手动标记） ---
+// --- Canvas 点击（选择 / 画线 / 手动标记） ---
 const onCanvasClick = (e: MouseEvent) => {
+  if (!drawingCanvas.value) return
+  const rect = drawingCanvas.value.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+
   // 手动买卖点标记模式
   if (markerMode.value === 'buy' || markerMode.value === 'sell') {
-    if (!chart.value || !candleSeries.value || !drawingCanvas.value) return
-    const rect = drawingCanvas.value.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    // 将坐标转换为时间 / 价格
+    if (!chart.value || !candleSeries.value) return
     const time = chart.value.timeScale().coordinateToTime(x)
     const price = candleSeries.value.coordinateToPrice(y)
     if (time == null || price == null) return
@@ -338,11 +340,13 @@ const onCanvasClick = (e: MouseEvent) => {
     return
   }
 
+  // 未选择画线工具时，尝试选中已有画线
+  if (!currentTool.value) {
+    selectDrawing(x, y)
+    return
+  }
+
   // 画线模式
-  if (!currentTool.value || !drawingCanvas.value) return
-  const rect = drawingCanvas.value.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
   addPoint(x, y)
 }
 
