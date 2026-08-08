@@ -124,7 +124,8 @@ export function useChartCore(chartContainer: Ref<HTMLElement | null>) {
    * 清空所有 series
    */
   const clearAllSeries = () => {
-    seriesMap.value.forEach((_, id) => removeSeries(id))
+    const ids = Array.from(seriesMap.value.keys())
+    ids.forEach(id => removeSeries(id))
   }
 
   /**
