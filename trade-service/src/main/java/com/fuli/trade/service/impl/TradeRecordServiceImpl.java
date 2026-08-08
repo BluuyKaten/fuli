@@ -8,17 +8,16 @@ import com.fuli.common.api.enums.TradeTypeEnum;
 import com.fuli.common.api.exception.BizCode;
 import com.fuli.common.api.exception.BusinessException;
 import com.fuli.common.api.feign.AuthFeignClient;
+import com.fuli.common.api.feign.DataFeignClient;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
 import com.fuli.trade.config.FuliProperties;
 import com.fuli.trade.dto.CashChangeMessage;
 import com.fuli.trade.entity.LocalMessage;
-import com.fuli.trade.entity.StockDailyData;
 import com.fuli.trade.entity.TradeRecord;
 import com.fuli.trade.event.TradeCreatedEvent;
 import com.fuli.trade.event.TradeDeletedEvent;
-import com.fuli.trade.mapper.StockDailyDataMapper;
 import com.fuli.trade.mapper.TradeRecordMapper;
 import com.fuli.trade.service.CashChangeService;
 import com.fuli.trade.service.LocalMessageService;
@@ -47,7 +46,7 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     private final PositionSummaryService positionSummaryService;
     private final LocalMessageService localMessageService;
     private final ApplicationEventPublisher eventPublisher;
-    private final StockDailyDataMapper stockDailyDataMapper;
+    private final DataFeignClient dataFeignClient;
     private final AuthFeignClient authFeignClient;
     private final FuliProperties fuliProperties;
     private final CashChangeService cashChangeService;
@@ -55,14 +54,14 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     public TradeRecordServiceImpl(PositionSummaryService positionSummaryService,
                                   LocalMessageService localMessageService,
                                   ApplicationEventPublisher eventPublisher,
-                                  StockDailyDataMapper stockDailyDataMapper,
+                                  DataFeignClient dataFeignClient,
                                   AuthFeignClient authFeignClient,
                                   FuliProperties fuliProperties,
                                   CashChangeService cashChangeService) {
         this.positionSummaryService = positionSummaryService;
         this.localMessageService = localMessageService;
         this.eventPublisher = eventPublisher;
-        this.stockDailyDataMapper = stockDailyDataMapper;
+        this.dataFeignClient = dataFeignClient;
         this.authFeignClient = authFeignClient;
         this.fuliProperties = fuliProperties;
         this.cashChangeService = cashChangeService;
@@ -472,18 +471,19 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
     }
 
     /**
-     * 获取前收盘价
+     * 获取前收盘价（通过 data-service Feign 获取，不再直接访问行情表）
      */
     private BigDecimal getPreClosePrice(String stockCode, LocalDate tradeDate) {
         try {
-            // 查询交易日期当天或最近的行情数据
-            LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(StockDailyData::getStockCode, stockCode)
-                    .le(StockDailyData::getTradeDate, tradeDate.format(DateTimeFormatter.ofPattern("yyyyMMdd")))
-                    .orderByDesc(StockDailyData::getTradeDate)
-                    .last("LIMIT 1");
-            StockDailyData dailyData = stockDailyDataMapper.selectOne(wrapper);
-            return dailyData != null ? dailyData.getPreClose() : null;
+            // 通过 data-service 获取最近的行情数据
+            var result = dataFeignClient.getLatestPrice(stockCode);
+            if (result != null && result.getCode() == 200 && result.getData() != null) {
+                Object preClose = result.getData().get("preClose");
+                if (preClose != null) {
+                    return new BigDecimal(preClose.toString());
+                }
+            }
+            return null;
         } catch (Exception e) {
             log.warn("获取股票 {} 前收盘价失败", stockCode);
             return null;

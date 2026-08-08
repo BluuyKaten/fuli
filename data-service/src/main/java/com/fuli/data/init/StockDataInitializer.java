@@ -1,11 +1,12 @@
-package com.fuli.trade.init;
+package com.fuli.data.init;
 
-import com.fuli.trade.entity.StockDailyData;
-import com.fuli.trade.entity.StockInfo;
-import com.fuli.trade.mapper.StockDailyDataMapper;
-import com.fuli.trade.mapper.StockInfoMapper;
+import com.fuli.data.entity.StockDailyData;
+import com.fuli.data.entity.StockInfo;
+import com.fuli.data.mapper.StockDailyDataMapper;
+import com.fuli.data.mapper.StockInfoMapper;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -16,7 +17,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * 样本行情数据初始化器（仅 local profile）。
+ *
+ * <p>在本地开发且行情表为空时，插入样本股票基础信息和模拟日线数据，
+ * 便于开发调试。生产环境不激活此初始化器。
+ */
 @Component
+@Profile("local")
 public class StockDataInitializer implements ApplicationRunner {
 
     private final StockDailyDataMapper stockDailyDataMapper;
@@ -24,7 +32,6 @@ public class StockDataInitializer implements ApplicationRunner {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final LocalDate START_DATE = LocalDate.of(2026, 6, 1);
-    // 动态计算结束日期为今天
     private static final LocalDate END_DATE = LocalDate.now();
 
     public StockDataInitializer(StockDailyDataMapper stockDailyDataMapper, StockInfoMapper stockInfoMapper) {

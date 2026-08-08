@@ -1,8 +1,6 @@
 package com.fuli.trade.controller;
 
 import com.fuli.common.api.Result;
-import com.fuli.trade.entity.StockDailyData;
-import com.fuli.trade.entity.StockInfo;
 import com.fuli.trade.service.StockService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,44 +22,25 @@ public class StockController {
     }
 
     @GetMapping("/search")
-    public Result<List<StockInfo>> search(@RequestParam String keyword) {
+    public Result<Map<String, Object>> search(@RequestParam String keyword) {
         return Result.success(stockService.searchStocks(keyword));
     }
 
     @GetMapping("/info")
     public Result<Map<String, Object>> info(@RequestParam String stockCode) {
-        StockInfo stockInfo = stockService.getStockInfo(stockCode);
-        if (stockInfo == null) {
+        Map<String, Object> stockInfo = stockService.getStockInfo(stockCode);
+        if (stockInfo == null || stockInfo.isEmpty()) {
             return Result.error("股票不存在");
         }
-        Map<String, Object> map = new HashMap<>();
-        map.put("stockCode", stockInfo.getStockCode());
-        map.put("stockName", stockInfo.getStockName());
-        map.put("area", stockInfo.getArea());
-        map.put("industry", stockInfo.getIndustry());
-        map.put("market", stockInfo.getMarket());
-        return Result.success(map);
+        return Result.success(stockInfo);
     }
 
     @GetMapping("/daily")
     public Result<List<Map<String, Object>>> daily(@RequestParam String stockCode,
                                                     @RequestParam(required = false) String startDate,
                                                     @RequestParam(required = false) String endDate) {
-        List<StockDailyData> dataList = stockService.getDailyData(stockCode, startDate, endDate);
-        List<Map<String, Object>> result = dataList.stream().map(data -> {
-            Map<String, Object> map = new HashMap<>();
-            map.put("stockCode", data.getStockCode());
-            map.put("tradeDate", data.getTradeDate());
-            map.put("openPrice", data.getOpenPrice());
-            map.put("highPrice", data.getHighPrice());
-            map.put("lowPrice", data.getLowPrice());
-            map.put("closePrice", data.getClosePrice());
-            map.put("preClose", data.getPreClose());
-            map.put("vol", data.getVol());
-            map.put("amount", data.getAmount());
-            return map;
-        }).collect(java.util.stream.Collectors.toList());
-        return Result.success(result);
+        List<Map<String, Object>> dataList = stockService.getDailyData(stockCode, startDate, endDate);
+        return Result.success(dataList);
     }
 
     /**
@@ -69,16 +48,11 @@ public class StockController {
      */
     @GetMapping("/latest-price")
     public Result<Map<String, Object>> latestPrice(@RequestParam String stockCode) {
-        StockDailyData latest = stockService.getLatestPrice(stockCode);
-        if (latest == null) {
+        Map<String, Object> latest = stockService.getLatestPrice(stockCode);
+        if (latest == null || latest.isEmpty()) {
             return Result.error("无行情数据");
         }
-        Map<String, Object> map = new HashMap<>();
-        map.put("stockCode", latest.getStockCode());
-        map.put("tradeDate", latest.getTradeDate());
-        map.put("closePrice", latest.getClosePrice());
-        map.put("preClose", latest.getPreClose());
-        return Result.success(map);
+        return Result.success(latest);
     }
 
     /**
@@ -90,14 +64,9 @@ public class StockController {
         for (String code : stockCodes.split(",")) {
             String trimmed = code.trim();
             if (trimmed.isEmpty()) continue;
-            StockDailyData latest = stockService.getLatestPrice(trimmed);
-            if (latest != null) {
-                Map<String, Object> map = new HashMap<>();
-                map.put("stockCode", latest.getStockCode());
-                map.put("tradeDate", latest.getTradeDate());
-                map.put("closePrice", latest.getClosePrice());
-                map.put("preClose", latest.getPreClose());
-                result.put(trimmed, map);
+            Map<String, Object> latest = stockService.getLatestPrice(trimmed);
+            if (latest != null && !latest.isEmpty()) {
+                result.put(trimmed, latest);
             }
         }
         return Result.success(result);
@@ -112,15 +81,9 @@ public class StockController {
         for (String code : stockCodes.split(",")) {
             String trimmed = code.trim();
             if (trimmed.isEmpty()) continue;
-            StockInfo stockInfo = stockService.getStockInfo(trimmed);
-            if (stockInfo != null) {
-                Map<String, Object> map = new HashMap<>();
-                map.put("stockCode", stockInfo.getStockCode());
-                map.put("stockName", stockInfo.getStockName());
-                map.put("area", stockInfo.getArea());
-                map.put("industry", stockInfo.getIndustry());
-                map.put("market", stockInfo.getMarket());
-                result.put(trimmed, map);
+            Map<String, Object> stockInfo = stockService.getStockInfo(trimmed);
+            if (stockInfo != null && !stockInfo.isEmpty()) {
+                result.put(trimmed, stockInfo);
             }
         }
         return Result.success(result);
@@ -159,3 +122,4 @@ public class StockController {
         return Result.success(result);
     }
 }
+

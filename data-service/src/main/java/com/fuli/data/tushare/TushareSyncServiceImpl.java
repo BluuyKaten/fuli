@@ -1,10 +1,10 @@
 package com.fuli.data.tushare;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fuli.trade.entity.StockDailyData;
-import com.fuli.trade.entity.StockInfo;
-import com.fuli.trade.mapper.StockDailyDataMapper;
-import com.fuli.trade.mapper.StockInfoMapper;
+import com.fuli.data.entity.StockDailyData;
+import com.fuli.data.entity.StockInfo;
+import com.fuli.data.mapper.StockDailyDataMapper;
+import com.fuli.data.mapper.StockInfoMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
@@ -15,8 +15,8 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j

@@ -1,14 +1,9 @@
 package com.fuli.trade.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fuli.common.api.feign.DataFeignClient;
 import com.fuli.trade.entity.PositionSummary;
-import com.fuli.trade.entity.StockDailyData;
-import com.fuli.trade.entity.StockInfo;
 import com.fuli.trade.entity.TradeRecord;
 import com.fuli.trade.mapper.PositionSummaryMapper;
-import com.fuli.trade.mapper.StockDailyDataMapper;
-import com.fuli.trade.mapper.StockInfoMapper;
 import com.fuli.trade.mapper.TradeRecordMapper;
 import com.fuli.trade.service.StockService;
 import lombok.extern.slf4j.Slf4j;
@@ -25,62 +20,60 @@ import java.util.Map;
 @Service
 public class StockServiceImpl implements StockService {
 
-    private final StockInfoMapper stockInfoMapper;
-    private final StockDailyDataMapper stockDailyDataMapper;
+    private final DataFeignClient dataFeignClient;
     private final PositionSummaryMapper positionSummaryMapper;
     private final TradeRecordMapper tradeRecordMapper;
 
-    public StockServiceImpl(StockInfoMapper stockInfoMapper,
-                            StockDailyDataMapper stockDailyDataMapper,
+    public StockServiceImpl(DataFeignClient dataFeignClient,
                             PositionSummaryMapper positionSummaryMapper,
                             TradeRecordMapper tradeRecordMapper) {
-        this.stockInfoMapper = stockInfoMapper;
-        this.stockDailyDataMapper = stockDailyDataMapper;
+        this.dataFeignClient = dataFeignClient;
         this.positionSummaryMapper = positionSummaryMapper;
         this.tradeRecordMapper = tradeRecordMapper;
     }
 
     @Override
-    public List<StockInfo> searchStocks(String keyword) {
-        QueryWrapper<StockInfo> wrapper = new QueryWrapper<>();
-        wrapper.like("stock_code", keyword).or().like("stock_name", keyword);
-        wrapper.orderByAsc("stock_code");
-        wrapper.last("LIMIT 20");
-        return stockInfoMapper.selectList(wrapper);
-    }
-
-    @Override
-    public List<StockDailyData> getDailyData(String stockCode, String startDate, String endDate) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, stockCode);
-        if (startDate != null && !startDate.isEmpty()) {
-            wrapper.ge(StockDailyData::getTradeDate, startDate);
+    public Map<String, Object> searchStocks(String keyword) {
+        var result = dataFeignClient.searchStocks(keyword);
+        if (result != null && result.getCode() == 200 && result.getData() != null) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("data", result.getData());
+            return response;
         }
-        if (endDate != null && !endDate.isEmpty()) {
-            wrapper.le(StockDailyData::getTradeDate, endDate);
+        return new HashMap<>();
+    }
+
+    @Override
+    public List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate) {
+        var result = dataFeignClient.getDailyData(stockCode, startDate, endDate);
+        if (result != null && result.getCode() == 200 && result.getData() != null) {
+            return result.getData();
         }
-        wrapper.orderByAsc(StockDailyData::getTradeDate);
-        return stockDailyDataMapper.selectList(wrapper);
+        return new java.util.ArrayList<>();
     }
 
     @Override
-    public StockInfo getStockInfo(String stockCode) {
-        return stockInfoMapper.selectById(stockCode);
+    public Map<String, Object> getStockInfo(String stockCode) {
+        var result = dataFeignClient.getStockInfo(stockCode);
+        if (result != null && result.getCode() == 200 && result.getData() != null) {
+            return result.getData();
+        }
+        return new HashMap<>();
     }
 
     @Override
-    public StockDailyData getLatestPrice(String stockCode) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, stockCode)
-                .orderByDesc(StockDailyData::getTradeDate)
-                .last("LIMIT 1");
-        return stockDailyDataMapper.selectOne(wrapper);
+    public Map<String, Object> getLatestPrice(String stockCode) {
+        var result = dataFeignClient.getLatestPrice(stockCode);
+        if (result != null && result.getCode() == 200 && result.getData() != null) {
+            return result.getData();
+        }
+        return new HashMap<>();
     }
 
     @Override
     public int getHoldingQuantity(Long userId, String stockCode) {
         PositionSummary position = positionSummaryMapper.selectOne(
-                new LambdaQueryWrapper<PositionSummary>()
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PositionSummary>()
                         .eq(PositionSummary::getUserId, userId)
                         .eq(PositionSummary::getStockCode, stockCode)
                         .eq(PositionSummary::getDeleted, 0)
@@ -107,8 +100,8 @@ public class StockServiceImpl implements StockService {
         Map<String, Object> result = new HashMap<>();
 
         // 1. 获取股票信息，判断市场类型
-        StockInfo stockInfo = stockInfoMapper.selectById(stockCode);
-        String market = stockInfo != null ? stockInfo.getMarket() : "";
+        Map<String, Object> stockInfo = getStockInfo(stockCode);
+        String market = stockInfo.get("market") != null ? stockInfo.get("market").toString() : "";
         boolean isAStock = isAStock(market, stockCode);
 
         // 2. 获取总持仓数量
@@ -145,7 +138,7 @@ public class StockServiceImpl implements StockService {
      * - 北京：8xxxxx.BJ、43xxxx.BJ
      */
     private boolean isAStock(String market, String stockCode) {
-        if (market == null) {
+        if (market == null || market.isEmpty()) {
             // 兜底：通过代码后缀判断
             return stockCode != null && (stockCode.endsWith(".SH") || stockCode.endsWith(".SZ") || stockCode.endsWith(".BJ"));
         }
@@ -159,7 +152,7 @@ public class StockServiceImpl implements StockService {
         try {
             LocalDate today = LocalDate.now();
             List<TradeRecord> todayBuys = tradeRecordMapper.selectList(
-                    new LambdaQueryWrapper<TradeRecord>()
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TradeRecord>()
                             .eq(TradeRecord::getUserId, userId)
                             .eq(TradeRecord::getStockCode, stockCode)
                             .eq(TradeRecord::getTradeType, 1)  // 买入
@@ -182,7 +175,7 @@ public class StockServiceImpl implements StockService {
 
         // 1. 查询用户所有交易记录
         List<TradeRecord> trades = tradeRecordMapper.selectList(
-                new LambdaQueryWrapper<TradeRecord>()
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TradeRecord>()
                         .eq(TradeRecord::getUserId, userId)
                         .orderByAsc(TradeRecord::getTradeDate)
         );
@@ -221,7 +214,7 @@ public class StockServiceImpl implements StockService {
             BigDecimal avgCost = costMap.getOrDefault(stockCode, BigDecimal.ZERO);
 
             PositionSummary position = positionSummaryMapper.selectOne(
-                    new LambdaQueryWrapper<PositionSummary>()
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PositionSummary>()
                             .eq(PositionSummary::getUserId, userId)
                             .eq(PositionSummary::getStockCode, stockCode)
             );
@@ -248,3 +241,4 @@ public class StockServiceImpl implements StockService {
         return result;
     }
 }
+

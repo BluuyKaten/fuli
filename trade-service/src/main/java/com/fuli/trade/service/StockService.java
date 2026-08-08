@@ -1,23 +1,20 @@
 package com.fuli.trade.service;
 
-import com.fuli.trade.entity.StockDailyData;
-import com.fuli.trade.entity.StockInfo;
-
 import java.util.List;
 import java.util.Map;
 
 public interface StockService {
 
-    List<StockInfo> searchStocks(String keyword);
+    Map<String, Object> searchStocks(String keyword);
 
-    List<StockDailyData> getDailyData(String stockCode, String startDate, String endDate);
+    List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate);
 
-    StockInfo getStockInfo(String stockCode);
+    Map<String, Object> getStockInfo(String stockCode);
 
     /**
      * 获取股票最新行情
      */
-    StockDailyData getLatestPrice(String stockCode);
+    Map<String, Object> getLatestPrice(String stockCode);
 
     /**
      * 查询用户持仓数量
@@ -35,3 +32,4 @@ public interface StockService {
      */
     Map<String, Object> fixHoldingData(Long userId);
 }
+

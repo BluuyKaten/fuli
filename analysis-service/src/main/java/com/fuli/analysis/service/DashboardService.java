@@ -3,6 +3,7 @@ package com.fuli.analysis.service;
 import com.fuli.analysis.vo.DashboardVO;
 import com.fuli.common.api.dto.TradeQueryDTO;
 import com.fuli.common.api.feign.AuthFeignClient;
+import com.fuli.common.api.feign.DataFeignClient;
 import com.fuli.common.api.feign.TradeFeignClient;
 import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.TradeVO;
@@ -22,11 +23,14 @@ public class DashboardService {
 
     private final TradeFeignClient tradeFeignClient;
     private final AuthFeignClient authFeignClient;
+    private final DataFeignClient dataFeignClient;
 
     public DashboardService(TradeFeignClient tradeFeignClient,
-                            AuthFeignClient authFeignClient) {
+                            AuthFeignClient authFeignClient,
+                            DataFeignClient dataFeignClient) {
         this.tradeFeignClient = tradeFeignClient;
         this.authFeignClient = authFeignClient;
+        this.dataFeignClient = dataFeignClient;
     }
 
     public DashboardVO getDashboardData(Long userId) {
@@ -140,7 +144,8 @@ public class DashboardService {
 
     private StockLatestPrice getLatestPrice(String stockCode) {
         try {
-            var result = tradeFeignClient.getLatestPrice(stockCode);
+            // 通过 data-service 获取行情（不再经过 trade-service 中转）
+            var result = dataFeignClient.getLatestPrice(stockCode);
             if (result != null && result.getCode() == 200 && result.getData() != null) {
                 Map<String, Object> data = result.getData();
                 BigDecimal closePrice = data.get("closePrice") != null
@@ -165,9 +170,9 @@ public class DashboardService {
                 return trade.getStockName();
             }
         }
-        // 通过 Feign 获取
+        // 通过 data-service 获取
         try {
-            var result = tradeFeignClient.getStockInfo(stockCode);
+            var result = dataFeignClient.getStockInfo(stockCode);
             if (result != null && result.getCode() == 200 && result.getData() != null) {
                 Object name = result.getData().get("stockName");
                 if (name != null) return name.toString();

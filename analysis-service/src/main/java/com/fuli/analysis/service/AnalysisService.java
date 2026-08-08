@@ -1,6 +1,7 @@
 package com.fuli.analysis.service;
 
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.feign.DataFeignClient;
 import com.fuli.common.api.feign.TradeFeignClient;
 import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.StatisticsVO;
@@ -20,9 +21,11 @@ import java.util.stream.Collectors;
 public class AnalysisService {
 
     private final TradeFeignClient tradeFeignClient;
+    private final DataFeignClient dataFeignClient;
 
-    public AnalysisService(TradeFeignClient tradeFeignClient) {
+    public AnalysisService(TradeFeignClient tradeFeignClient, DataFeignClient dataFeignClient) {
         this.tradeFeignClient = tradeFeignClient;
+        this.dataFeignClient = dataFeignClient;
     }
 
     public StatisticsVO getStatistics(Long userId, String stockCode, LocalDate startDate, LocalDate endDate) {
@@ -126,7 +129,8 @@ public class AnalysisService {
         for (String stockCode : stockCodes) {
             Map<LocalDate, BigDecimal> dailyPrices = new HashMap<>();
             try {
-                var result = tradeFeignClient.getStockDaily(stockCode,
+                // 通过 data-service 获取日线数据
+                var result = dataFeignClient.getDailyData(stockCode,
                         firstTradeDate.format(fmt), endDateActual.format(fmt));
                 if (result != null && result.getCode() == 200 && result.getData() != null) {
                     for (Map<String, Object> item : result.getData()) {

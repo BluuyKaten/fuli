@@ -5,12 +5,12 @@ import com.fuli.common.api.enums.TradeTypeEnum;
 import com.fuli.common.api.exception.BizCode;
 import com.fuli.common.api.exception.BusinessException;
 import com.fuli.common.api.feign.AuthFeignClient;
+import com.fuli.common.api.feign.DataFeignClient;
 import com.fuli.common.api.Result;
 import com.fuli.trade.config.FuliProperties;
 import com.fuli.trade.entity.PositionSummary;
 import com.fuli.trade.entity.TradeRecord;
 import com.fuli.trade.mapper.PositionSummaryMapper;
-import com.fuli.trade.mapper.StockDailyDataMapper;
 import com.fuli.trade.mapper.TradeRecordMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +21,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,11 +48,11 @@ class TradeRecordServiceImplTest {
     @Autowired
     private PositionSummaryMapper positionSummaryMapper;
 
-    @Autowired
-    private StockDailyDataMapper stockDailyDataMapper;
-
     @MockitoBean
     private AuthFeignClient authFeignClient;
+
+    @MockitoBean
+    private DataFeignClient dataFeignClient;
 
     @MockitoBean
     private org.springframework.context.ApplicationEventPublisher applicationEventPublisher;
@@ -70,10 +71,17 @@ class TradeRecordServiceImplTest {
         // 清理数据
         tradeRecordMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>());
         positionSummaryMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>());
-        stockDailyDataMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>());
 
-        // 插入行情数据,避免卖出涨跌停校验阻塞
-        insertDailyData("600519", "20250101", "100.00");
+        // Mock data-service Feign:返回行情数据,避免卖出涨跌停校验阻塞
+        when(dataFeignClient.getLatestPrice(any()))
+                .thenAnswer(invocation -> {
+                    String stockCode = invocation.getArgument(0);
+                    Map<String, Object> data = new java.util.HashMap<>();
+                    data.put("preClose", new BigDecimal("100.00"));
+                    data.put("closePrice", new BigDecimal("100.00"));
+                    data.put("tradeDate", "20250101");
+                    return Result.success(data);
+                });
 
         // Mock Feign:默认资金充足
         when(authFeignClient.getUserCash(eq(USER_ID)))
@@ -231,13 +239,5 @@ class TradeRecordServiceImplTest {
                         .eq(PositionSummary::getUserId, USER_ID)
                         .eq(PositionSummary::getStockCode, stockCode));
         return list.isEmpty() ? null : list.get(0);
-    }
-
-    private void insertDailyData(String stockCode, String tradeDate, String preClose) {
-        com.fuli.trade.entity.StockDailyData data = new com.fuli.trade.entity.StockDailyData();
-        data.setStockCode(stockCode);
-        data.setTradeDate(tradeDate);
-        data.setPreClose(new BigDecimal(preClose));
-        stockDailyDataMapper.insert(data);
     }
 }
