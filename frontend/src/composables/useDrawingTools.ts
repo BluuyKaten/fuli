@@ -104,15 +104,21 @@ export function useDrawingTools(
     redraw()
   }
 
-  // --- Canvas 渲染 ---
+  // --- Canvas 渲染（rAF 节流，防止频繁事件导致死循环）---
+  let rafId: number | null = null
+
   const redraw = () => {
-    const ctx = canvasCtx.value
-    const canvas = drawingCanvas.value
-    if (!ctx || !canvas) return
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-    for (const d of drawings.value) {
-      if (d.visible) drawObject(ctx, d, canvas)
-    }
+    if (rafId !== null) return // 已有待执行的重绘，跳过
+    rafId = requestAnimationFrame(() => {
+      rafId = null
+      const ctx = canvasCtx.value
+      const canvas = drawingCanvas.value
+      if (!ctx || !canvas) return
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      for (const d of drawings.value) {
+        if (d.visible) drawObject(ctx, d, canvas)
+      }
+    })
   }
 
   const drawObject = (ctx: CanvasRenderingContext2D, obj: DrawingObject, canvas: HTMLCanvasElement) => {
