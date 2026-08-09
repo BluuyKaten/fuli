@@ -74,6 +74,7 @@ public class AuthController {
         String token = jwtUtil.generateToken(user.getId(), user.getUsername());
 
         LoginVO loginVO = new LoginVO();
+        loginVO.setUserId(user.getId());
         loginVO.setToken(token);
         loginVO.setTokenType("Bearer");
         loginVO.setExpiresIn(86400L);

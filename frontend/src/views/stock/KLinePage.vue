@@ -26,6 +26,7 @@
         :style="{ flex: topRow[1].minimized ? 0 : topRow[1].ratio, minWidth: topRow[1].minimized ? 0 : '300px' }"
       >
         <LightweightChart
+          :key="activeStock?.stockCode"
           ref="chartRef"
           :stock-code="activeStock?.stockCode || ''"
           @price-change="currentPrice = $event"
@@ -109,7 +110,20 @@ const positionRef = ref<InstanceType<typeof PositionPanel> | null>(null)
 // 默认展示股票（fallback）：用户未自选时展示此股票，便于新用户快速预览
 const DEFAULT_STOCK = { stockCode: '600519', stockName: '贵州茅台' }
 
-const activeStock = ref<StockInfo | null>({ ...DEFAULT_STOCK })
+// 当前选中股票（优先恢复上次查看的，否则默认贵州茅台）
+const _restored = (() => {
+  try {
+    const stored = localStorage.getItem('lastViewedStock')
+    if (stored) {
+      const stock = JSON.parse(stored)
+      if (stock?.stockCode) return stock
+    }
+  } catch { /* 忽略 */ }
+  return null
+})()
+const activeStock = ref<StockInfo | null>(_restored ?? { ...DEFAULT_STOCK })
+// 标记是否已恢复上次查看的股票（避免 loadDefaultStock 覆盖）
+const hasRestoredStock = !!_restored
 const currentPrice = ref('')
 
 // 拖拽状态
@@ -163,6 +177,8 @@ const bindDragEvents = () => {
 
 const onSelectStock = (stock: StockInfo) => {
   activeStock.value = { ...stock, stockCode: toPureCode(stock.stockCode) }
+  // 持久化到 localStorage，刷新后恢复
+  localStorage.setItem('lastViewedStock', JSON.stringify(activeStock.value))
   // LightweightChart 通过 watch 自动响应 stockCode 变化
 }
 
@@ -172,6 +188,8 @@ const onTradeSuccess = () => {
 
 // 默认加载第一只自选股
 const loadDefaultStock = async () => {
+  // 如果已恢复上次查看的股票，不覆盖
+  if (hasRestoredStock) return
   try {
     const { getWatchlist } = await import('@/api/watchlist')
     const res = await getWatchlist()

@@ -28,11 +28,22 @@ export function useIndicators(
   chart: Ref<IChartApi | null>,
   theme: Ref<ChartTheme> | Readonly<Ref<ChartTheme>>
 ) {
-  // 当前启用的指标配置（默认启用 MA5/MA10/MACD）
-  const activeIndicators = reactive<IndicatorConfig>({
+  // 指标配置持久化 key
+  const INDICATOR_KEY = 'kline_active_indicators'
+
+  // 从 localStorage 读取初始配置，默认启用 MA5/MA10/MACD
+  const savedConfig = localStorage.getItem(INDICATOR_KEY)
+  const defaultConfig: IndicatorConfig = {
     ma5: true, ma10: true, ma20: false, ma60: false,
     macd: true, kdj: false, rsi: false, boll: false
-  })
+  }
+  const initialConfig = savedConfig ? { ...defaultConfig, ...JSON.parse(savedConfig) } : defaultConfig
+  const activeIndicators = reactive<IndicatorConfig>(initialConfig)
+
+  // 保存指标配置到 localStorage
+  const saveIndicators = () => {
+    localStorage.setItem(INDICATOR_KEY, JSON.stringify(activeIndicators))
+  }
 
   // 管理所有指标系列的引用
   const indicatorSeries = reactive<Map<string, ISeriesApi<any>>>(new Map())
@@ -193,6 +204,7 @@ export function useIndicators(
     activeIndicators,
     updateIndicators,
     clearAllIndicators,
-    indicatorSeries
+    indicatorSeries,
+    saveIndicators
   }
 }

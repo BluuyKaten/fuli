@@ -8,6 +8,7 @@ export interface ApiResponse<T = unknown> {
 
 /** 登录返回(对齐后端 LoginVO) */
 export interface LoginVO {
+  userId: number
   token: string
   tokenType: string
   expiresIn: number

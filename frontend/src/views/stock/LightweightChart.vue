@@ -33,6 +33,18 @@
           @click="startDrawTool(tool.type)"
           :title="tool.label"
         >{{ tool.label }}</button>
+        <button
+          class="draw-btn"
+          :disabled="!selectedId"
+          @click="selectedId && deleteDrawing(selectedId)"
+          title="删除选中画线 (Del)"
+        >删除</button>
+        <button
+          class="draw-btn"
+          :disabled="!drawings.length"
+          @click="clearAllDrawings()"
+          title="清空当前股票所有画线"
+        >清空</button>
       </div>
 
       <!-- 买卖点标记模式 -->
@@ -77,8 +89,12 @@
       <canvas
         ref="drawingCanvas"
         class="drawing-canvas"
-        :class="{ active: currentTool }"
-        @click="onCanvasClick"
+        :class="{ active: currentTool, 'select-mode': isSelectMode }"
+        @mousedown="onCanvasMouseDown"
+        @mousemove="onCanvasMouseMove"
+        @mouseup="onCanvasMouseUp"
+        @mouseleave="onCanvasMouseUp"
+        @wheel="onCanvasWheel"
       />
       <!-- 信息面板（内联简单展示，Task 13 将替换为 InfoPanel 组件） -->
       <div v-if="panelData" class="info-panel">
@@ -118,14 +134,15 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch, computed } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch, computed, nextTick } from 'vue'
 import type { ISeriesApi } from 'lightweight-charts'
 import { message } from 'ant-design-vue'
 import {
   getStockMinuteData,
   getStockWeeklyData,
   getStockMonthlyData,
-  getStockDailyData
+  getStockDailyData,
+  saveDrawing
 } from '@/api/kline'
 import { toTushareCode } from '@/utils/stockCode'
 import type { CandleItem } from '@/types/indicators'
@@ -182,15 +199,15 @@ const chartCore = useChartCore(chartContainer)
 const { chart, initChart, applyTheme, addCandlestickSeries, addHistogramSeries, destroyChart } = chartCore
 
 const { currentTheme, currentThemeName, toggleTheme: toggleThemeBase } = useChartTheme()
-const { activeIndicators, updateIndicators } = useIndicators(chart, currentTheme)
+const { activeIndicators, updateIndicators, saveIndicators } = useIndicators(chart, currentTheme)
 
 // candleSeries ref：用于传递给 useTradeMarkers
 const candleSeries = ref<ISeriesApi<any> | null>(null)
 const { loadAutoMarkers, addManualMarker } = useTradeMarkers(chart, candleSeries)
 
 const {
-  currentTool, initCanvas, startDraw, addPoint,
-  selectDrawing,
+  currentTool, initCanvas, startDraw, addPoint, updateMousePosition,
+  selectDrawing, startDrag, endDrag, drawings, selectedId, deleteDrawing, clearDrawings,
   loadDrawings, redraw, subscribeChartMove, unsubscribeChartMove
 } = useDrawingTools(chart, drawingCanvas, candleSeries)
 
@@ -203,6 +220,9 @@ const { panelData, subscribeCrosshair, unsubscribeCrosshair } = useInfoPanel(
   dailyData,
   activeIndicators
 )
+
+// Tushare 代码（用于画线保存/加载，与数据库格式一致）
+const tushareCode = computed(() => toTushareCode(props.stockCode))
 
 // --- 周期选项 ---
 const periods = [
@@ -230,6 +250,7 @@ const indicatorList: { key: keyof IndicatorConfig; label: string }[] = [
 
 // --- 画线工具列表 ---
 const drawingTools = [
+  { type: 'select' as DrawingType, label: '选择' },
   { type: 'trend' as DrawingType, label: '趋势线' },
   { type: 'horizontal' as DrawingType, label: '水平线' },
   { type: 'ray' as DrawingType, label: '射线' },
@@ -241,6 +262,9 @@ const drawingTools = [
   { type: 'triangle' as DrawingType, label: '三角形' },
   { type: 'text' as DrawingType, label: '文字' }
 ]
+
+// 当前工具是否为"选择"模式（非画线）
+const isSelectMode = computed(() => currentTool.value === 'select')
 
 // --- 买卖点标记模式 ---
 const markerMode = ref<'' | 'buy' | 'sell'>('')
@@ -304,6 +328,7 @@ const changePeriod = (period: string) => {
 const toggleIndicator = (key: keyof IndicatorConfig) => {
   activeIndicators[key] = !activeIndicators[key]
   refreshIndicators()
+  saveIndicators() // 持久化到 localStorage
 }
 
 // --- 刷新指标渲染 ---
@@ -323,8 +348,8 @@ const startDrawTool = (tool: DrawingType) => {
   startDraw(tool)
 }
 
-// --- Canvas 点击（选择 / 画线 / 手动标记） ---
-const onCanvasClick = (e: MouseEvent) => {
+// --- Canvas 鼠标按下（选择 / 画线 / 拖拽控制点 / 手动标记） ---
+const onCanvasMouseDown = (e: MouseEvent) => {
   if (!drawingCanvas.value) return
   const rect = drawingCanvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
@@ -340,14 +365,61 @@ const onCanvasClick = (e: MouseEvent) => {
     return
   }
 
-  // 未选择画线工具时，尝试选中已有画线
-  if (!currentTool.value) {
-    selectDrawing(x, y)
+  // 未选择画线工具（或为"选择"模式）时：先尝试拖拽控制点，再尝试选中
+  if (!currentTool.value || currentTool.value === 'select') {
+    if (startDrag(x, y)) return // 命中控制点，开始拖拽
+    if (selectDrawing(x, y)) return // 命中线，已选中
+    // 未命中任何画线：临时穿透事件给图表，允许拖拽图表
+    passthroughToChart()
     return
   }
 
-  // 画线模式
+  // 画线模式：添加点
   addPoint(x, y)
+}
+
+// --- 临时穿透事件给图表（允许拖拽/缩放 K 线图） ---
+let passthroughRestore: (() => void) | null = null
+const passthroughToChart = () => {
+  const canvas = drawingCanvas.value
+  if (!canvas || passthroughRestore) return
+  canvas.style.pointerEvents = 'none'
+  // 在 document 上监听 mouseup，松开后恢复
+  const restore = () => {
+    if (drawingCanvas.value) drawingCanvas.value.style.pointerEvents = ''
+    passthroughRestore = null
+    document.removeEventListener('mouseup', restore)
+  }
+  passthroughRestore = restore
+  document.addEventListener('mouseup', restore)
+}
+
+// --- Canvas 鼠标移动（预览线 / 拖拽更新） ---
+const onCanvasMouseMove = (e: MouseEvent) => {
+  if (!drawingCanvas.value) return
+  const rect = drawingCanvas.value.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  updateMousePosition(x, y)
+}
+
+// --- Canvas 鼠标松开（结束拖拽） ---
+const onCanvasMouseUp = () => {
+  endDrag()
+}
+
+// --- 滚轮缩放穿透（选择模式下允许缩放 K 线图） ---
+let wheelRestoreTimer: ReturnType<typeof setTimeout> | null = null
+const onCanvasWheel = () => {
+  const canvas = drawingCanvas.value
+  if (!canvas) return
+  canvas.style.pointerEvents = 'none'
+  if (wheelRestoreTimer) clearTimeout(wheelRestoreTimer)
+  // 滚轮停止 150ms 后恢复拦截
+  wheelRestoreTimer = setTimeout(() => {
+    if (drawingCanvas.value) drawingCanvas.value.style.pointerEvents = ''
+    wheelRestoreTimer = null
+  }, 150)
 }
 
 // --- 导出 ---
@@ -489,14 +561,18 @@ watch(currentTheme, (newTheme) => {
 })
 
 // --- 监听周期变化 ---
-watch(currentPeriod, () => {
-  loadData()
-  loadDrawings(props.stockCode, currentPeriod.value)
+watch(currentPeriod, async () => {
+  drawings.value = [] // 立即清空画线
+  selectedId.value = null
+  redraw()
+  await loadData()
+  await nextTick() // 等待 K 线图渲染
+  loadDrawings(tushareCode.value, currentPeriod.value)
   loadAutoMarkers(props.stockCode)
 })
 
 // --- 监听股票变化 ---
-watch(() => props.stockCode, () => {
+watch(() => props.stockCode, async () => {
   if (props.stockCode) {
     currentPeriod.value = '1D'
     // 从本地存储读取股票信息
@@ -510,8 +586,12 @@ watch(() => props.stockCode, () => {
     } catch {
       stockInfo.value = { stockName: props.stockCode, stockCode: props.stockCode }
     }
-    loadData()
-    loadDrawings(props.stockCode, currentPeriod.value)
+    drawings.value = [] // 立即清空画线
+    selectedId.value = null
+    redraw()
+    await loadData()
+    await nextTick() // 等待 K 线图渲染
+    loadDrawings(tushareCode.value, currentPeriod.value)
     loadAutoMarkers(props.stockCode)
   }
 })
@@ -540,9 +620,28 @@ onMounted(() => {
 
   // 加载数据
   loadData()
-  loadDrawings(props.stockCode, currentPeriod.value)
+  loadDrawings(tushareCode.value, currentPeriod.value)
   loadAutoMarkers(props.stockCode)
+
+  // 监听键盘删除事件
+  window.addEventListener('keydown', onKeyDown)
 })
+
+// --- 键盘事件（删除选中画线）---
+const onKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (selectedId.value) {
+      deleteDrawing(selectedId.value)
+    }
+  }
+}
+
+// --- 清空当前股票所有画线 ---
+const clearAllDrawings = () => {
+  if (confirm(`确定要清空当前股票的所有 ${drawings.value.length} 条画线吗？`)) {
+    clearDrawings()
+  }
+}
 
 // --- 生命周期：卸载 ---
 onBeforeUnmount(() => {
@@ -550,7 +649,30 @@ onBeforeUnmount(() => {
   unsubscribeCrosshair()
   unsubscribeChartMove()
   destroyChart()
+  window.removeEventListener('keydown', onKeyDown) // 移除键盘监听
+  // 组件卸载前保存画线（防止切换股票时组件销毁导致数据丢失）
+  saveDrawingsOnUnmount()
 })
+
+// --- 组件卸载前保存画线 ---
+const saveDrawingsOnUnmount = () => {
+  if (!drawings.value.length) return
+  const userId = Number(localStorage.getItem('userId') || '0')
+  const stockCode = toTushareCode(props.stockCode)
+  const data = JSON.stringify(drawings.value)
+  // 同步保存到 localStorage（确保不丢失）
+  const LOCAL_KEY = 'kline_drawings'
+  try {
+    const map = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}')
+    map[`${stockCode}|${currentPeriod.value}`] = drawings.value
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(map))
+  } catch (e) {
+    console.error('[onBeforeUnmount] localStorage 保存失败', e)
+  }
+  if (userId <= 0) return
+  saveDrawing({ userId, stockCode, period: currentPeriod.value, data })
+    .catch(e => console.error('[onBeforeUnmount] 保存失败', e))
+}
 </script>
 
 <style scoped>
@@ -767,6 +889,11 @@ onBeforeUnmount(() => {
 .drawing-canvas.active {
   pointer-events: auto;
   cursor: crosshair;
+}
+
+/* 选择模式下保持接收鼠标事件，但使用默认光标 */
+.drawing-canvas.select-mode {
+  cursor: default;
 }
 
 /* --- 信息面板 --- */
