@@ -17,7 +17,10 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./sql:/docker-entrypoint-initdb.d:ro
+      - ./sql/auth_db.sql:/docker-entrypoint-initdb.d/01-auth.sql:ro
+      - ./sql/trade_db.sql:/docker-entrypoint-initdb.d/02-trade.sql:ro
+      - ./sql/data_db.sql:/docker-entrypoint-initdb.d/03-data.sql:ro
+      - ./sql/migrations/V2__lightweight_charts.sql:/docker-entrypoint-initdb.d/04-charts.sql:ro
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci

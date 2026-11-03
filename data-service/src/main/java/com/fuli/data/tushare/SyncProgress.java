@@ -19,7 +19,7 @@ public class SyncProgress implements Serializable {
     private String taskId;
 
     /** 任务状态 */
-    private SyncStatus status;
+    private TaskStatus status;
 
     /** 起始日期 yyyyMMdd */
     private String startDate;
@@ -64,7 +64,7 @@ public class SyncProgress implements Serializable {
     private String errorDetail;
 
     public SyncProgress() {
-        this.status = SyncStatus.PENDING;
+        this.status = TaskStatus.PENDING;
         this.startTime = LocalDateTime.now();
     }
 
@@ -80,9 +80,9 @@ public class SyncProgress implements Serializable {
     }
 
     /**
-     * 同步任务状态枚举
+     * 同步任务状态枚举（命名为 TaskStatus，避免与同包顶层 SyncStatus DTO 混淆）。
      */
-    public enum SyncStatus {
+    public enum TaskStatus {
         /** 等待中 */
         PENDING,
         /** 运行中 */

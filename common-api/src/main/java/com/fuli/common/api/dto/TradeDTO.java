@@ -17,6 +17,12 @@ public class TradeDTO implements Serializable {
 
     private Long id;
 
+    /**
+     * 客户端幂等键：同一笔提交（双击/网络重试）复用同一个值，服务端据此去重，
+     * 避免重复扣款 + 重复落单。可为空（为空则不启用幂等去重）。
+     */
+    private String requestId;
+
     @NotNull(message = "用户ID不能为空")
     private Long userId;
 

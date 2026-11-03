@@ -4,8 +4,10 @@ server:
 spring:
   application:
     name: gateway-service
-  config:
-    import: optional:nacos:${spring.application.name}.yaml?refresh=true
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
   cloud:
     nacos:
       config:
@@ -14,34 +16,13 @@ spring:
       discovery:
         server-addr: ${NACOS_SERVER:127.0.0.1:8848}
     gateway:
-      discovery:
-        locator:
-          enabled: true
-      routes:
-        - id: auth-service
-          uri: http://localhost:8081
-          predicates:
-            - Path=/api/auth/**,/api/watchlist/**
-          filters:
-            - StripPrefix=1
-        - id: trade-service
-          uri: http://localhost:8082
-          predicates:
-            - Path=/api/trade/**,/api/stock/**
-          filters:
-            - StripPrefix=1
-        - id: analysis-service
-          uri: http://localhost:8083
-          predicates:
-            - Path=/api/analysis/**
-          filters:
-            - StripPrefix=1
-        - id: data-service
-          uri: http://localhost:8084
-          predicates:
-            - Path=/api/data/**
-          filters:
-            - StripPrefix=1
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: false
+
+# 路由由 GatewayRouteConfig 统一声明；默认 lb://，local profile 覆盖 fuli.routes.*。
 
 # JWT 密钥通过按需注册机制生效：
 #   - 本地开发：激活 local profile（见 application-local.yml）
@@ -50,4 +31,22 @@ spring:
 
 logging:
   level:
-    org.springframework.cloud.gateway: DEBUG
+    org.springframework.cloud.gateway: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+---
+# local 完全使用本地配置；仅其他 profile 从 Nacos 导入配置。
+spring:
+  config:
+    activate:
+      on-profile: "!local"
+    import: optional:nacos:${spring.application.name}.yaml?refresh=true

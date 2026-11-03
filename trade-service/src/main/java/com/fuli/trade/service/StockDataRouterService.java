@@ -18,8 +18,11 @@ public class StockDataRouterService {
 
     private final List<StockDataSource> dataSources;
 
-    // 主数据源名称（可配置）
-    private static final String PRIMARY_SOURCE = "Tushare";
+    // 主数据源：当前仅实现 EastMoney 一个数据源（分钟/周/月线）。
+    // 原设计「主源 Tushare 失败切 EastMoney」中的 Tushare 数据源尚未实现，
+    // findSource("Tushare") 恒为 null 是死分支，因此主源直接指向 EastMoney。
+    // 待后续接入 Tushare 分钟/周/月线源时，可把 PRIMARY_SOURCE 改回 "Tushare"。
+    private static final String PRIMARY_SOURCE = "EastMoney";
     private static final String SECONDARY_SOURCE = "EastMoney";
 
     public List<KlineBarDTO> getMinuteData(String stockCode, int period) {

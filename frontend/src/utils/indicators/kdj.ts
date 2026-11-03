@@ -1,5 +1,5 @@
 // kdj.ts - KDJ 指标计算
-import type { CandleItem } from '@/types/indicators'
+import type { HighLowClosePrice } from '@/types/indicators'
 
 export interface KDJResult { k: number[]; d: number[]; j: number[] }
 
@@ -8,7 +8,7 @@ export interface KDJResult { k: number[]; d: number[]; j: number[] }
  * @param data K 线数据
  * @param n 计算周期（默认 9）
  */
-export function calcKDJ(data: CandleItem[], n = 9): KDJResult {
+export function calcKDJ(data: HighLowClosePrice[], n = 9): KDJResult {
   const kArr: number[] = [], dArr: number[] = [], jArr: number[] = []
   for (let i = 0; i < data.length; i++) {
     if (i < n - 1) {

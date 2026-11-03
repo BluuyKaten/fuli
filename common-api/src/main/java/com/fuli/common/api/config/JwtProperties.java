@@ -4,6 +4,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * JWT 密钥统一配置。
  *
@@ -45,9 +47,10 @@ public class JwtProperties {
             throw new IllegalStateException(
                     "JWT 密钥未配置：jwt.secret 为空。请通过环境变量 JWT_SECRET 注入至少 32 字节的强密钥。");
         }
-        if (secret.length() < 32) {
+        if (secret.getBytes(StandardCharsets.UTF_8).length < 32) {
             throw new IllegalStateException(
-                    "JWT 密钥过短：当前长度 " + secret.length() + "，要求 >= 32 字节。请更换更强的 JWT_SECRET。");
+                    "JWT 密钥过短：当前字节长度 " + secret.getBytes(StandardCharsets.UTF_8).length
+                            + "，要求 >= 32 字节。请更换更强的 JWT_SECRET。");
         }
         for (String weak : WEAK_DEFAULTS) {
             if (secret.equals(weak)) {

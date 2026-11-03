@@ -40,9 +40,10 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
-import { searchStocks } from '@/api/stock'
+import { searchStocks, getStockLatestPrice } from '@/api/stock'
 import type { StockInfo } from '@/types'
 import { getWatchlist, addToWatchlist } from '@/api/watchlist'
+import { toTushareCode } from '@/utils/stockCode'
 
 const emit = defineEmits<{
   (e: 'select-stock', stock: StockInfo): void
@@ -56,7 +57,7 @@ const keyword = ref('')
 const searchResults = ref<StockInfo[]>([])
 const watchlist = ref<StockInfo[]>([])
 
-// 模拟一些行情数据（实际项目中应该从 WebSocket 或轮询获取）
+// 行情数据（从后端获取真实数据）
 const changeMap = ref<Record<string, number>>({})
 
 const displayList = computed(() => {
@@ -130,14 +131,28 @@ const loadWatchlist = async () => {
       { stockCode: '300750', stockName: '宁德时代', industry: '电池', market: '深圳' }
     ]
   }
-  simulatePriceChange()
+  // 加载真实行情数据
+  loadAllPrices()
 }
 
-// 模拟行情波动（实际项目中应该从 WebSocket 或轮询获取）
-const simulatePriceChange = () => {
-  watchlist.value.forEach(s => {
-    changeMap.value[s.stockCode] = +(Math.random() * 10 - 5).toFixed(2)
-  })
+// 加载所有股票的实时行情
+const loadAllPrices = async () => {
+  for (const stock of watchlist.value) {
+    try {
+      const tushareCode = toTushareCode(stock.stockCode)
+      const res = await getStockLatestPrice(tushareCode)
+      if (res.code === 200 && res.data) {
+        const { closePrice, preClose } = res.data
+        const close = parseFloat(closePrice)
+        const pre = parseFloat(preClose)
+        if (pre > 0) {
+          changeMap.value[stock.stockCode] = +(((close - pre) / pre) * 100).toFixed(2)
+        }
+      }
+    } catch (e) {
+      console.error(`[WatchlistPanel] 加载 ${stock.stockCode} 行情失败:`, e)
+    }
+  }
 }
 
 onMounted(() => {

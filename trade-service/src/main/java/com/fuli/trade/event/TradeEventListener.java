@@ -2,6 +2,7 @@ package com.fuli.trade.event;
 
 import com.fuli.common.api.enums.TradeTypeEnum;
 import com.fuli.trade.service.CashChangeService;
+import com.fuli.trade.service.LocalMessageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -16,23 +17,27 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class TradeEventListener {
 
     private final CashChangeService cashChangeService;
+    private final LocalMessageService localMessageService;
 
-    public TradeEventListener(CashChangeService cashChangeService) {
+    public TradeEventListener(CashChangeService cashChangeService, LocalMessageService localMessageService) {
         this.cashChangeService = cashChangeService;
+        this.localMessageService = localMessageService;
     }
 
     /**
-     * 在事务提交后异步处理资金变动
+     * 在事务提交后异步处理资金变动。
+     * 注意：买入已改为本地事务内同步扣款，TradeCreatedEvent 仅由卖出路径发布，
+     * 因此这里只处理卖出入账（BUY 分支不再可达，已移除）。
      */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void handleTradeCreated(TradeCreatedEvent event) {
         try {
-            if (TradeTypeEnum.BUY.getCode().equals(event.getTradeType())) {
-                cashChangeService.deductCash(event.getUserId(), event.getAmount(), event.getMsgId());
-            } else if (TradeTypeEnum.SELL.getCode().equals(event.getTradeType())) {
+            if (TradeTypeEnum.SELL.getCode().equals(event.getTradeType())) {
                 cashChangeService.addCash(event.getUserId(), event.getAmount(), event.getMsgId());
             }
+            // 首次投递即成功：回写消息状态，避免 5 分钟后被重试任务重复投递
+            localMessageService.markSuccessByMsgId(event.getMsgId());
             log.info("资金变动成功: tradeId={}, type={}, amount={}, msgId={}",
                     event.getTradeId(), event.getTradeType(), event.getAmount(), event.getMsgId());
         } catch (Exception e) {
@@ -58,6 +63,7 @@ public class TradeEventListener {
                 // 卖出被删除 → 反向扣款(收回资金)
                 cashChangeService.deductCash(event.getUserId(), event.getAmount(), event.getMsgId());
             }
+            localMessageService.markSuccessByMsgId(event.getMsgId());
             log.info("删除回滚资金变动成功: tradeId={}, type={}, amount={}, msgId={}",
                     event.getTradeId(), event.getTradeType(), event.getAmount(), event.getMsgId());
         } catch (Exception e) {

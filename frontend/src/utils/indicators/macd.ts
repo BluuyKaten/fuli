@@ -1,5 +1,5 @@
 // macd.ts
-import type { CandleItem } from '@/types/indicators'
+import type { ClosePrice } from '@/types/indicators'
 import { calcEMA } from './ema'
 
 export interface MACDResult {
@@ -8,7 +8,7 @@ export interface MACDResult {
   histogram: number[]
 }
 
-export function calcMACD(data: CandleItem[], fast = 12, slow = 26, signal = 9): MACDResult {
+export function calcMACD(data: ClosePrice[], fast = 12, slow = 26, signal = 9): MACDResult {
   const emaFast = calcEMA(data, fast)
   const emaSlow = calcEMA(data, slow)
   const dif = emaFast.map((v, i) => (isNaN(v) || isNaN(emaSlow[i])) ? NaN : +(v - emaSlow[i]).toFixed(4))

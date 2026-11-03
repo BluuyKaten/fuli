@@ -29,20 +29,6 @@ export interface UserProfile {
   status: number
 }
 
-/** 持仓信息 */
-export interface Position {
-  stockCode: string
-  stockName: string
-  holdingQuantity: number
-  availableQuantity: number
-  costPrice: number
-  currentPrice: number
-  marketValue: number
-  floatingProfitLoss: number
-  dailyProfitLoss: number
-  priceDate: string | null
-}
-
 /** 仪表盘数据(对应 analysis-service DashboardService 返回结构) */
 export interface DashboardData {
   userId?: number
@@ -64,18 +50,18 @@ export interface DashboardData {
   lastSyncDate?: string | null
 }
 
-/** 持仓(对应 analysis-service PositionVO) */
+/** 持仓(对应后端 common-api PositionVO) */
 export interface PositionVO {
   stockCode: string
   stockName: string
   holdingQuantity: number
-  avgCost: number
+  availableQuantity: number
+  costPrice: number
   currentPrice: number
   marketValue: number
-  profitLoss: number
-  profitLossPercent: number
-  dailyProfitLoss?: number
-  priceDate?: string | null
+  floatingProfitLoss: number
+  dailyProfitLoss: number
+  priceDate: string | null
 }
 
 /** 统计数据(对齐后端 StatisticsVO) */
@@ -150,3 +136,135 @@ export interface StockDailyData {
   vol?: number
   amount?: number
 }
+
+/** 交易复盘笔记 */
+export interface TradeJournal {
+  id: number
+  userId: number
+  title: string
+  stockCode?: string
+  stockName?: string
+  journalDate: string
+  emotionScore: number
+  marketSentiment?: string
+  strategyType?: string
+  content: string
+  reflection?: string
+  tags?: string
+  createTime?: string
+  updateTime?: string
+}
+
+export interface TradeJournalRequest {
+  title: string
+  stockCode?: string
+  stockName?: string
+  journalDate?: string
+  emotionScore?: number
+  marketSentiment?: string
+  strategyType?: string
+  content: string
+  reflection?: string
+  tags?: string
+}
+
+export interface JournalCalendarItem {
+  date: string
+  count: number
+  avgEmotion: number
+  titles: string[]
+}
+
+/** 风控价格预警 */
+export interface PriceAlert {
+  id: number
+  userId: number
+  stockCode: string
+  stockName: string
+  alertType: number // 1: 止盈上限, 2: 止损下限, 3: 涨超%, 4: 跌超%
+  targetValue: number
+  notes?: string
+  status: number // 0: 监控中, 1: 已触发, 2: 已停用
+  triggeredTime?: string
+  triggeredValue?: number
+  currentPrice?: number
+  changePct?: number
+  distancePct?: number
+  createTime?: string
+  updateTime?: string
+}
+
+export interface PriceAlertRequest {
+  stockCode: string
+  stockName?: string
+  alertType: number
+  targetValue: number
+  notes?: string
+}
+
+/** 高级绩效指标 */
+export interface PerformanceStats {
+  totalTrades: number
+  buyCount: number
+  sellCount: number
+  winCount: number
+  lossCount: number
+  breakEvenCount: number
+  winRate: number
+  totalProfitLoss: number
+  totalProfitAmount: number
+  totalLossAmount: number
+  profitLossRatio: number
+  profitFactor: number
+  avgWinAmount: number
+  avgLossAmount: number
+  avgTradeProfit: number
+  maxConsecutiveWins: number
+  maxConsecutiveLosses: number
+  avgHoldingDays: number
+  bestTrade?: {
+    stockCode: string
+    stockName: string
+    profitLoss: number
+    profitLossRatio: number
+    tradeDate: string
+  }
+  worstTrade?: {
+    stockCode: string
+    stockName: string
+    profitLoss: number
+    profitLossRatio: number
+    tradeDate: string
+  }
+  profitDistribution: Array<{
+    label: string
+    count: number
+    percentage: number
+  }>
+  holdingDistribution: Array<{
+    label: string
+    count: number
+    percentage: number
+  }>
+  topProfitStocks: Array<{
+    stockCode: string
+    stockName: string
+    profitLoss: number
+    tradeCount: number
+    winRate: number
+  }>
+  topLossStocks: Array<{
+    stockCode: string
+    stockName: string
+    profitLoss: number
+    tradeCount: number
+    winRate: number
+  }>
+  monthlyStats: Array<{
+    month: string
+    profitLoss: number
+    tradeCount: number
+    winRate: number
+  }>
+}
+

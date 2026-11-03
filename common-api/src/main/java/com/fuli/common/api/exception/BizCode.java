@@ -27,4 +27,7 @@ public final class BizCode {
 
     /** 资金校验失败(防透支) */
     public static final int CASH_VALIDATION_FAILED = 4006;
+
+    /** 重复提交（幂等键冲突） */
+    public static final int DUPLICATE_REQUEST = 4007;
 }

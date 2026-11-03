@@ -98,6 +98,13 @@ const userCash = ref(0)
 const submitting = ref(false)
 let userId = 0
 
+// 生成客户端幂等键：同一笔提交（防双击）复用，服务端据此去重。
+const generateRequestId = () => {
+  const c = globalThis.crypto as Crypto | undefined
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 const price = computed(() => props.price || (form.tradePrice ? String(form.tradePrice) : ''));
 
 // 金额（分）= 价格(分) × 数量，用整数计算避免浮点精度问题
@@ -146,6 +153,7 @@ const loadAvailableQuantity = async (stockCode: string) => {
 }
 
 const handleSubmit = async () => {
+  if (submitting.value) return // 防重入：提交中忽略重复点击
   if (!form.stockCode || !form.stockName) { message.warning('请先选择股票'); return }
   if (!form.tradePrice || form.tradePrice <= 0) { message.warning('请输入价格'); return }
   if (!form.tradeQuantity || form.tradeQuantity <= 0) { message.warning('请输入数量'); return }
@@ -167,7 +175,8 @@ const handleSubmit = async () => {
       tradeType: form.tradeType,
       tradePrice: form.tradePrice,
       tradeQuantity: form.tradeQuantity,
-      tradeDate: new Date().toISOString().slice(0, 10)
+      tradeDate: new Date().toISOString().slice(0, 10),
+      requestId: generateRequestId()
     })
     if (res.code === 200) {
       message.success(`${form.tradeType === 1 ? '买入' : '卖出'}成功`)

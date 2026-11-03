@@ -1,7 +1,7 @@
 // ema.ts
-import type { CandleItem } from '@/types/indicators'
+import type { ClosePrice } from '@/types/indicators'
 
-export function calcEMA(data: CandleItem[], period: number): number[] {
+export function calcEMA(data: ClosePrice[], period: number): number[] {
   if (period <= 0 || data.length === 0) return []
   const k = 2 / (period + 1)
   const result: number[] = []

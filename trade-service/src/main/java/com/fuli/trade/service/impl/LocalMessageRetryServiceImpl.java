@@ -40,6 +40,11 @@ public class LocalMessageRetryServiceImpl implements LocalMessageRetryService {
             }
             log.info("扫描到 {} 条待重试消息", messages.size());
             for (LocalMessage msg : messages) {
+                // 多实例部署时先抢占，未抢到的实例直接跳过，避免重复投递
+                if (!localMessageService.tryClaim(msg)) {
+                    log.debug("消息已被其他实例抢占，跳过: msgId={}", msg.getMsgId());
+                    continue;
+                }
                 try {
                     processMessage(msg);
                     localMessageService.markSuccess(msg.getId());
@@ -63,21 +68,18 @@ public class LocalMessageRetryServiceImpl implements LocalMessageRetryService {
      */
     private void processMessage(LocalMessage msg) {
         String payload = msg.getPayload();
-        if (payload == null || payload.isEmpty()) {
-            return;
+        if (payload == null || payload.isBlank()) {
+            throw new IllegalArgumentException("资金变动消息载荷不能为空");
         }
         CashChangeMessage message;
         try {
             message = objectMapper.readValue(payload, CashChangeMessage.class);
         } catch (Exception e) {
-            log.warn("消息 payload 解析失败: msgId={}, payload={}, error={}",
-                    msg.getMsgId(), payload, e.getMessage());
-            return;
+            throw new IllegalArgumentException("资金变动消息载荷解析失败", e);
         }
-        try {
-            cashChangeService.processCashChange(message);
-        } catch (IllegalArgumentException e) {
-            log.warn("消息处理被拒绝: msgId={}, error={}", msg.getMsgId(), e.getMessage());
+        if (message == null || msg.getMsgId() == null || !msg.getMsgId().equals(message.getMsgId())) {
+            throw new IllegalArgumentException("资金变动消息幂等标识不一致");
         }
+        cashChangeService.processCashChange(message);
     }
 }

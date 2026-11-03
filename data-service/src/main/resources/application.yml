@@ -1,8 +1,6 @@
 spring:
   application:
     name: data-service
-  config:
-    import: optional:nacos:${spring.application.name}.yaml?refresh=true
   cloud:
     nacos:
       config:
@@ -24,8 +22,36 @@ mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
 tushare:
   token: ${TUSHARE_TOKEN:}
   api-url: https://api.tushare.pro
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%X{traceId:-}] [%15.15t] %-40.40logger{39} : %m%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+---
+# 生产（非 local）配置：从 Nacos 导入配置，并默认关闭接口文档。
+spring:
+  config:
+    activate:
+      on-profile: "!local"
+    import: optional:nacos:${spring.application.name}.yaml?refresh=true
+
+# 生产环境默认关闭 swagger/OpenAPI 文档，需要时设 SWAGGER_ENABLED=true 临时开启。
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}

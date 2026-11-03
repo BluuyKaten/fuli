@@ -34,7 +34,7 @@ import static org.mockito.Mockito.*;
  */
 import org.springframework.transaction.annotation.Transactional;
 
-@SpringBootTest
+@SpringBootTest(properties = {"spring.cloud.nacos.config.enabled=false", "spring.cloud.nacos.discovery.enabled=false"})
 @ActiveProfiles("test")
 @Transactional
 class TradeRecordServiceImplTest {
@@ -73,15 +73,13 @@ class TradeRecordServiceImplTest {
         positionSummaryMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>());
 
         // Mock data-service Feign:返回行情数据,避免卖出涨跌停校验阻塞
-        when(dataFeignClient.getLatestPrice(any()))
-                .thenAnswer(invocation -> {
-                    String stockCode = invocation.getArgument(0);
-                    Map<String, Object> data = new java.util.HashMap<>();
-                    data.put("preClose", new BigDecimal("100.00"));
-                    data.put("closePrice", new BigDecimal("100.00"));
-                    data.put("tradeDate", "20250101");
-                    return Result.success(data);
-                });
+        when(dataFeignClient.getDailyData(any(), any(), any()))
+                .thenAnswer(invocation -> List.of(Map.<String, Object>of(
+                        "preClose", new BigDecimal("100.00"),
+                        "lowPrice", new BigDecimal("95.00"),
+                        "highPrice", new BigDecimal("108.00"),
+                        "closePrice", new BigDecimal("100.00"),
+                        "tradeDate", invocation.getArgument(1, String.class))));
 
         // Mock Feign:默认资金充足
         when(authFeignClient.getUserCash(eq(USER_ID)))
@@ -181,6 +179,58 @@ class TradeRecordServiceImplTest {
     }
 
     @Test
+    void createTrade_buyWithoutEnoughCash_isRejectedBeforePersisting() {
+        when(authFeignClient.deductCash(any(), any(), any()))
+                .thenReturn(Result.error(BizCode.CASH_INSUFFICIENT, "可用资金不足，当前余额 ¥100.00"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> tradeRecordService.createTrade(newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100)));
+
+        assertEquals(BizCode.CASH_INSUFFICIENT, ex.getCode());
+        assertTrue(tradeRecordMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>()).isEmpty());
+        assertNull(getPosition("600519"));
+    }
+
+    @Test
+    void createTrade_buyWhenCashServiceUnavailable_isRejectedByDefaultPolicy() {
+        when(authFeignClient.deductCash(any(), any(), any()))
+                .thenThrow(new RuntimeException("connect timed out"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> tradeRecordService.createTrade(newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100)));
+
+        assertEquals(BizCode.CASH_VALIDATION_FAILED, ex.getCode());
+        assertNull(getPosition("600519"));
+    }
+
+    @Test
+    void createTrade_buyWhenDeductionNotConfirmed_isRejected() {
+        when(authFeignClient.deductCash(any(), any(), any())).thenReturn(Result.success(false));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> tradeRecordService.createTrade(newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100)));
+
+        assertEquals(BizCode.CASH_VALIDATION_FAILED, ex.getCode());
+        assertTrue(tradeRecordMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>()).isEmpty());
+    }
+
+    @Test
+    void createTrade_sellSameDayAsBuy_isRejectedByT1() {
+        TradeDTO buy = newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100);
+        buy.setTradeDate(java.time.LocalDate.now());
+        tradeRecordService.createTrade(buy);
+
+        TradeDTO sell = newSellDTO("600519", "贵州茅台", new BigDecimal("105.00"), 100);
+        sell.setTradeDate(java.time.LocalDate.now());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> tradeRecordService.createTrade(sell));
+
+        assertEquals(BizCode.POSITION_INSUFFICIENT, ex.getCode());
+        assertEquals(100, getPosition("600519").getTotalQuantity());
+    }
+
+    @Test
     void deleteTradeWithRollback_buy_shouldReversePosition() {
         Long buyId = tradeRecordService.createTrade(newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100));
         assertNotNull(getPosition("600519"));
@@ -204,6 +254,38 @@ class TradeRecordServiceImplTest {
         assertFalse(tradeRecordService.isLastTrade(id1));
     }
 
+    @Test
+    void createTrade_withSameRequestId_shouldReturnSameIdAndPersistOnce() {
+        TradeDTO buy = newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100);
+        buy.setRequestId("req-001");
+
+        Long first = tradeRecordService.createTrade(buy);
+        Long second = tradeRecordService.createTrade(buy);
+
+        // 同一 requestId 的重复提交应返回同一条记录，且只落库一次、只扣款一次
+        assertEquals(first, second);
+        assertEquals(1, tradeRecordMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>()).size());
+        assertEquals(100, getPosition("600519").getTotalQuantity());
+        verify(authFeignClient, times(1)).deductCash(any(), any(), any());
+    }
+
+    @Test
+    void createTrade_withDifferentRequestId_shouldCreateTwoRecords() {
+        TradeDTO buy1 = newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100);
+        buy1.setRequestId("req-001");
+        TradeDTO buy2 = newBuyDTO("600519", "贵州茅台", new BigDecimal("100.00"), 100);
+        buy2.setRequestId("req-002");
+
+        Long id1 = tradeRecordService.createTrade(buy1);
+        Long id2 = tradeRecordService.createTrade(buy2);
+
+        assertNotEquals(id1, id2);
+        assertEquals(2, tradeRecordMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>()).size());
+        assertEquals(200, getPosition("600519").getTotalQuantity());
+    }
+
     private TradeDTO newBuyDTO(String code, String name, BigDecimal price, int qty) {
         TradeDTO dto = new TradeDTO();
         dto.setUserId(USER_ID);
@@ -214,7 +296,7 @@ class TradeRecordServiceImplTest {
         dto.setTradeQuantity(qty);
         dto.setCommission(new BigDecimal("5.00"));
         dto.setTax(BigDecimal.ZERO);
-        dto.setTradeDate(java.time.LocalDate.now());
+        dto.setTradeDate(java.time.LocalDate.of(2025, 1, 1));
         return dto;
     }
 

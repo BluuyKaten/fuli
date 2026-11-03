@@ -20,3 +20,6 @@ export const updateProfile = (data: { nickname?: string; email?: string; phone?:
 
 export const changePassword = (oldPassword: string, newPassword: string) =>
   request.put<any, { code: number; data: boolean; message: string }>('/auth/password', { oldPassword, newPassword })
+
+export const logoutApi = () =>
+  request.post<any, { code: number; data: boolean; message: string }>('/auth/logout')

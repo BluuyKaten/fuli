@@ -1,3 +1,20 @@
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+    openfeign:
+      client:
+        config:
+          authFeignClient:
+            url: http://localhost:8081
+          tradeFeignClient:
+            url: http://localhost:8082
+          dataFeignClient:
+            url: http://localhost:8084
+
 # 本地开发 Profile（analysis-service）
 # 使用方式：spring.profiles.active=local
 #
@@ -11,10 +28,3 @@ jwt:
 fuli:
   # 本地开发用随机密钥（>= 16 字节），请勿用于生产。
   internal-key: dev-only-internal-key-0123456789
-
-# 暴露 actuator 端点
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info

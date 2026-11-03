@@ -46,13 +46,10 @@ public class IdempotentMessageServiceImpl implements IdempotentMessageService {
         try {
             action.run();
         } catch (RuntimeException e) {
-            // 业务失败,标记 FAILED,并删除幂等记录允许后续重试
-            try {
-                idempotentMessageMapper.updateFailed(msgId, IdempotentMessage.STATUS_FAILED,
-                        truncate(e.getMessage(), 512));
-            } catch (Exception ex) {
-                log.warn("更新幂等失败状态异常: msgId={}", msgId, ex);
-            }
+            // 业务失败：本方法 @Transactional 会随异常整体回滚，第 1 步的幂等记录 INSERT
+            // 一并撤销，不会落库 FAILED 状态，因此下次携带同一 msgId 可重新执行（天然支持重试）。
+            // 注意：不要在事务内更新 FAILED 状态——它会被随后的回滚一起撤销，是无效操作。
+            log.info("幂等操作业务失败，事务回滚，允许重试: msgId={}, error={}", msgId, e.getMessage());
             throw e;
         }
 
@@ -114,13 +111,9 @@ public class IdempotentMessageServiceImpl implements IdempotentMessageService {
             log.info("幂等重复成功: msgId={}", msgId);
             return true;
         }
-        // STATUS_FAILED: 返回 false,由调用方决定是否重试
+        // STATUS_FAILED: 当前实现不会产生 FAILED 记录（失败即回滚删除），此分支仅为
+        // 兼容历史数据或未来可能的设计，返回 false 由调用方决定是否重试。
         log.info("幂等记录上次失败,允许重试: msgId={}", msgId);
         return false;
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null) return null;
-        return s.length() > max ? s.substring(0, max) : s;
     }
 }

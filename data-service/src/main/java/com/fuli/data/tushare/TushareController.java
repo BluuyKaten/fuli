@@ -115,7 +115,7 @@ public class TushareController {
             try {
                 SyncProgress progress = new SyncProgress();
                 progress.setTaskId(taskId);
-                progress.setStatus(SyncProgress.SyncStatus.FAILED);
+                progress.setStatus(SyncProgress.TaskStatus.FAILED);
                 progress.setMessage("任务不存在或已过期");
                 deadEmitter.send(SseEmitter.event().name("progress").data(progress));
                 deadEmitter.complete();
@@ -185,6 +185,7 @@ public class TushareController {
             return Result.error("重试失败: " + e.getMessage());
         }
     }
+    @GetMapping("/sync/status")
     public Result<SyncStatus> syncStatus(@RequestParam String tsCode) {
         try {
             SyncStatus status = tushareSyncService.getSyncStatus(tsCode);

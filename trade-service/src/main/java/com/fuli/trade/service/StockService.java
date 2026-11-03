@@ -17,6 +17,18 @@ public interface StockService {
     Map<String, Object> getLatestPrice(String stockCode);
 
     /**
+     * 批量获取股票最新行情（一次 Feign 批量调用，消除 N+1）
+     * @param stockCodes 逗号分隔的股票代码
+     * @return key=股票代码, value=行情 Map
+     */
+    Map<String, Map<String, Object>> getLatestPrices(String stockCodes);
+
+    /**
+     * 批量获取股票基础信息（一次 Feign 批量调用，消除 N+1）
+     */
+    Map<String, Map<String, Object>> getStockInfos(String stockCodes);
+
+    /**
      * 查询用户持仓数量
      */
     int getHoldingQuantity(Long userId, String stockCode);

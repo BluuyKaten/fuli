@@ -36,6 +36,22 @@ export function useInfoPanel(
 ) {
   const currentIndex = ref(-1)
 
+  // 指标序列缓存：作为 computed 依赖 data + activeIndicators，
+  // 仅在数据或指标开关变化时重算，十字光标移动时不再全量重算各指标。
+  const indicatorSeries = computed(() => {
+    const d = data.value
+    return {
+      ma5: activeIndicators.ma5 ? calcMA(d, 5) : null,
+      ma10: activeIndicators.ma10 ? calcMA(d, 10) : null,
+      ma20: activeIndicators.ma20 ? calcMA(d, 20) : null,
+      ma60: activeIndicators.ma60 ? calcMA(d, 60) : null,
+      macd: activeIndicators.macd ? calcMACD(d) : null,
+      kdj: activeIndicators.kdj ? calcKDJ(d) : null,
+      rsi: activeIndicators.rsi ? calcRSI(d) : null,
+      boll: activeIndicators.boll ? calcBOLL(d) : null
+    }
+  })
+
   const panelData = computed<InfoPanelData | null>(() => {
     const idx = currentIndex.value
     if (idx < 0 || idx >= data.value.length) return null
@@ -55,24 +71,22 @@ export function useInfoPanel(
       bollUpper: null, bollMiddle: null, bollLower: null
     }
 
-    if (activeIndicators.ma5) result.ma5 = calcMA(data.value, 5)[idx]
-    if (activeIndicators.ma10) result.ma10 = calcMA(data.value, 10)[idx]
-    if (activeIndicators.ma20) result.ma20 = calcMA(data.value, 20)[idx]
-    if (activeIndicators.ma60) result.ma60 = calcMA(data.value, 60)[idx]
-    if (activeIndicators.macd) {
-      const { dif, dea, histogram } = calcMACD(data.value)
-      result.macdDif = dif[idx]
-      result.macdDea = dea[idx]
-      result.macdHist = histogram[idx]
+    const s = indicatorSeries.value
+    if (s.ma5) result.ma5 = s.ma5[idx]
+    if (s.ma10) result.ma10 = s.ma10[idx]
+    if (s.ma20) result.ma20 = s.ma20[idx]
+    if (s.ma60) result.ma60 = s.ma60[idx]
+    if (s.macd) {
+      result.macdDif = s.macd.dif[idx]
+      result.macdDea = s.macd.dea[idx]
+      result.macdHist = s.macd.histogram[idx]
     }
-    if (activeIndicators.kdj) {
-      const { k, d, j } = calcKDJ(data.value)
-      result.kdjK = k[idx]; result.kdjD = d[idx]; result.kdjJ = j[idx]
+    if (s.kdj) {
+      result.kdjK = s.kdj.k[idx]; result.kdjD = s.kdj.d[idx]; result.kdjJ = s.kdj.j[idx]
     }
-    if (activeIndicators.rsi) result.rsi = calcRSI(data.value)[idx]
-    if (activeIndicators.boll) {
-      const { upper, middle, lower } = calcBOLL(data.value)
-      result.bollUpper = upper[idx]; result.bollMiddle = middle[idx]; result.bollLower = lower[idx]
+    if (s.rsi) result.rsi = s.rsi[idx]
+    if (s.boll) {
+      result.bollUpper = s.boll.upper[idx]; result.bollMiddle = s.boll.middle[idx]; result.bollLower = s.boll.lower[idx]
     }
 
     return result

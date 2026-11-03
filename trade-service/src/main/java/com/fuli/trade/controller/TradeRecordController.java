@@ -3,6 +3,7 @@ package com.fuli.trade.controller;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
 import com.fuli.trade.service.TradeRecordService;
@@ -32,30 +33,39 @@ public class TradeRecordController {
     }
 
     private Long getCurrentUserId() {
-        String userIdHeader = request.getHeader("X-User-Id");
-        if (userIdHeader != null && !userIdHeader.isEmpty()) {
-            return Long.parseLong(userIdHeader);
+        return com.fuli.common.api.security.AuthenticatedUser.requireId(request);
+    }
+
+    private TradeVO requireOwnedTrade(Long id) {
+        Long userId = getCurrentUserId();
+        TradeVO record = tradeRecordService.getTradeById(id);
+        if (record == null) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "记录不存在");
         }
-        return null;
+        if (!userId.equals(record.getUserId())) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "无权访问该交易记录");
+        }
+        return record;
     }
 
     @PostMapping
     public Result<Long> create(@RequestBody TradeDTO tradeDTO) {
-        if (tradeDTO.getUserId() == null) {
-            tradeDTO.setUserId(getCurrentUserId());
-        }
+        tradeDTO.setUserId(getCurrentUserId());
         Long id = tradeRecordService.createTrade(tradeDTO);
         return Result.success("创建成功", id);
     }
 
     @PutMapping("/{id}")
     public Result<Boolean> update(@PathVariable Long id, @RequestBody TradeDTO tradeDTO) {
+        requireOwnedTrade(id);
+        tradeDTO.setUserId(getCurrentUserId());
         boolean result = tradeRecordService.updateTrade(id, tradeDTO);
         return Result.success(result ? "更新成功" : "更新失败", result);
     }
 
     @DeleteMapping("/{id}")
     public Result<Boolean> delete(@PathVariable Long id) {
+        requireOwnedTrade(id);
         boolean result = tradeRecordService.deleteTradeWithRollback(id);
         return Result.success(result ? "删除成功" : "删除失败", result);
     }
@@ -68,41 +78,58 @@ public class TradeRecordController {
 
     @GetMapping("/{id}")
     public Result<TradeVO> getById(@PathVariable Long id) {
-        TradeVO vo = tradeRecordService.getTradeById(id);
-        return vo != null ? Result.success(vo) : Result.error("记录不存在");
+        return Result.success(requireOwnedTrade(id));
     }
 
     @PostMapping("/list")
     public Result<List<TradeVO>> list(@RequestBody TradeQueryDTO queryDTO) {
-        if (queryDTO.getUserId() == null) {
-            queryDTO.setUserId(getCurrentUserId());
-        }
+        queryDTO.setUserId(getCurrentUserId());
         List<TradeVO> list = tradeRecordService.listTrades(queryDTO);
         return Result.success(list);
     }
 
     @PostMapping("/page")
     public Result<?> page(@RequestBody TradeQueryDTO queryDTO) {
-        if (queryDTO.getUserId() == null) {
-            queryDTO.setUserId(getCurrentUserId());
-        }
+        queryDTO.setUserId(getCurrentUserId());
         return Result.success(tradeRecordService.pageTrades(queryDTO));
     }
 
     @PostMapping("/queryByCondition")
     public Result<List<TradeVO>> queryByCondition(@RequestBody TradeQueryDTO queryDTO) {
-        if (queryDTO.getUserId() == null) {
-            queryDTO.setUserId(getCurrentUserId());
-        }
+        queryDTO.setUserId(getCurrentUserId());
         List<TradeVO> list = tradeRecordService.queryByCondition(queryDTO);
         return Result.success(list);
     }
 
+    @PostMapping("/internal/queryByCondition")
+    public Result<List<TradeVO>> internalQueryByCondition(@RequestBody TradeQueryDTO queryDTO) {
+        requireInternalUserId(queryDTO);
+        return Result.success(tradeRecordService.queryByCondition(queryDTO));
+    }
+
+    @PostMapping("/internal/statistics")
+    public Result<StatisticsVO> internalStatistics(@RequestBody TradeQueryDTO queryDTO) {
+        requireInternalUserId(queryDTO);
+        return Result.success(tradeRecordService.getStatistics(queryDTO));
+    }
+
+    @GetMapping("/internal/positions")
+    public Result<List<PositionVO>> internalPositions(@RequestParam Long userId) {
+        if (userId == null || userId <= 0) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "内部查询需要用户ID");
+        }
+        return Result.success(tradeRecordService.getUserPositions(userId));
+    }
+
+    private void requireInternalUserId(TradeQueryDTO queryDTO) {
+        if (queryDTO.getUserId() == null || queryDTO.getUserId() <= 0) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "内部查询需要用户ID");
+        }
+    }
+
     @PostMapping("/statistics")
     public Result<StatisticsVO> statistics(@RequestBody TradeQueryDTO queryDTO) {
-        if (queryDTO.getUserId() == null) {
-            queryDTO.setUserId(getCurrentUserId());
-        }
+        queryDTO.setUserId(getCurrentUserId());
         StatisticsVO statistics = tradeRecordService.getStatistics(queryDTO);
         return Result.success(statistics);
     }

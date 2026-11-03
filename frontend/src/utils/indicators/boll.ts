@@ -1,5 +1,5 @@
 // boll.ts - BOLL 指标计算
-import type { CandleItem } from '@/types/indicators'
+import type { ClosePrice } from '@/types/indicators'
 import { calcMA } from './ma'
 
 export interface BOLLResult { upper: number[]; middle: number[]; lower: number[] }
@@ -10,7 +10,7 @@ export interface BOLLResult { upper: number[]; middle: number[]; lower: number[]
  * @param period 计算周期（默认 20）
  * @param k 标准差倍数（默认 2）
  */
-export function calcBOLL(data: CandleItem[], period = 20, k = 2): BOLLResult {
+export function calcBOLL(data: ClosePrice[], period = 20, k = 2): BOLLResult {
   const middle = calcMA(data, period)
   const upper: number[] = []
   const lower: number[] = []

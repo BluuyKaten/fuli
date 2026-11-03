@@ -8,10 +8,14 @@ import com.fuli.auth.util.JwtUtil;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.config.InternalKeyProperties;
 import com.fuli.common.api.dto.LoginDTO;
+import com.fuli.common.api.exception.BizCode;
+import com.fuli.common.api.exception.BusinessException;
+import com.fuli.common.api.security.TokenBlacklistService;
 import com.fuli.common.api.vo.LoginVO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,24 +40,23 @@ public class AuthController {
     private final HttpServletRequest request;
     private final IdempotentMessageService idempotentMessageService;
     private final InternalKeyProperties internalKeyProperties;
+    private final ObjectProvider<TokenBlacklistService> tokenBlacklistServiceProvider;
 
     public AuthController(UserService userService, PasswordEncoder passwordEncoder, JwtUtil jwtUtil,
                           HttpServletRequest request, IdempotentMessageService idempotentMessageService,
-                          InternalKeyProperties internalKeyProperties) {
+                          InternalKeyProperties internalKeyProperties,
+                          ObjectProvider<TokenBlacklistService> tokenBlacklistServiceProvider) {
         this.userService = userService;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
         this.request = request;
         this.idempotentMessageService = idempotentMessageService;
         this.internalKeyProperties = internalKeyProperties;
+        this.tokenBlacklistServiceProvider = tokenBlacklistServiceProvider;
     }
 
     private Long getCurrentUserId() {
-        String userIdHeader = request.getHeader("X-User-Id");
-        if (userIdHeader != null && !userIdHeader.isEmpty()) {
-            return Long.parseLong(userIdHeader);
-        }
-        return null;
+        return com.fuli.common.api.security.AuthenticatedUser.requireId(request);
     }
 
     @PostMapping("/login")
@@ -63,7 +66,7 @@ public class AuthController {
             return Result.error("用户名或密码错误");
         }
 
-        if (user.getStatus() == 0) {
+        if (Integer.valueOf(0).equals(user.getStatus())) {
             return Result.error("账号已被禁用");
         }
 
@@ -77,12 +80,41 @@ public class AuthController {
         loginVO.setUserId(user.getId());
         loginVO.setToken(token);
         loginVO.setTokenType("Bearer");
-        loginVO.setExpiresIn(86400L);
+        loginVO.setExpiresIn(jwtUtil.getExpirationSeconds());
         loginVO.setUsername(user.getUsername());
         loginVO.setNickname(user.getNickname());
         loginVO.setCash(user.getCash());
 
         return Result.success("登录成功", loginVO);
+    }
+
+    @PostMapping("/logout")
+    public Result<Boolean> logout() {
+        String token = extractBearerToken(request);
+        TokenBlacklistService blacklist = tokenBlacklistServiceProvider.getIfAvailable();
+        if (token != null && blacklist != null) {
+            try {
+                io.jsonwebtoken.Claims claims = jwtUtil.parseToken(token);
+                String jti = claims.getId();
+                java.util.Date exp = claims.getExpiration();
+                if (jti != null && exp != null) {
+                    long ttlSeconds = Math.max(1, (exp.getTime() - System.currentTimeMillis()) / 1000);
+                    blacklist.blacklist(jti, java.time.Duration.ofSeconds(ttlSeconds));
+                    log.info("用户登出，令牌已加入黑名单: userId={}", getCurrentUserId());
+                }
+            } catch (Exception e) {
+                log.warn("登出解析令牌失败: {}", e.getMessage());
+            }
+        }
+        return Result.success("已退出登录", true);
+    }
+
+    private String extractBearerToken(HttpServletRequest req) {
+        String header = req.getHeader("Authorization");
+        if (header != null && header.startsWith("Bearer ")) {
+            return header.substring(7);
+        }
+        return null;
     }
 
     @PostMapping("/register")
@@ -147,23 +179,27 @@ public class AuthController {
     public Result<Boolean> deductCash(@RequestParam Long userId,
                                       @RequestParam BigDecimal amount,
                                       @RequestParam(value = "msgId", required = false) String msgId) {
+        if (amount == null || amount.signum() <= 0) {
+            return Result.error(BizCode.PARAM_ERROR, "扣款金额必须大于 0");
+        }
         try {
             boolean success = idempotentMessageService.executeIdempotent(
                     msgId, userId, amount, IdempotentMessage.DIRECTION_DEDUCT, () -> {
                         User user = userService.getById(userId);
                         if (user == null) {
-                            throw new RuntimeException("用户不存在");
+                            throw new BusinessException(BizCode.PARAM_ERROR, "用户不存在");
                         }
-                        if (user.getCash().compareTo(amount) < 0) {
-                            throw new RuntimeException("现金不足");
-                        }
-                        // 原子更新,避免并发覆盖
-                        boolean updated = userService.deductCash(userId, amount);
-                        if (!updated) {
-                            throw new RuntimeException("扣款失败(现金不足或并发冲突)");
+                        // 条件更新（cash >= amount）是唯一的资金判定依据：
+                        // 查询再扣减会在并发下同时通过校验，导致余额被扣成负数。
+                        if (!userService.deductCash(userId, amount)) {
+                            throw new BusinessException(BizCode.CASH_INSUFFICIENT,
+                                    "可用资金不足，当前余额 ¥" + user.getCash().setScale(2, java.math.RoundingMode.HALF_UP));
                         }
                     });
             return Result.success("扣款成功", success);
+        } catch (BusinessException e) {
+            // 资金不足等业务失败需要把错误码透出，调用方据此区分"该拒单"和"该重试"
+            return Result.error(e.getCode(), e.getMessage());
         } catch (RuntimeException e) {
             return Result.error(e.getMessage());
         }
@@ -173,6 +209,9 @@ public class AuthController {
     public Result<Boolean> addCash(@RequestParam Long userId,
                                     @RequestParam BigDecimal amount,
                                     @RequestParam(value = "msgId", required = false) String msgId) {
+        if (amount == null || amount.signum() <= 0) {
+            return Result.error(BizCode.PARAM_ERROR, "入账金额必须大于 0");
+        }
         try {
             boolean success = idempotentMessageService.executeIdempotent(
                     msgId, userId, amount, IdempotentMessage.DIRECTION_ADD, () -> {
@@ -208,6 +247,9 @@ public class AuthController {
         if (!internalKeyProperties.isAllowDangerousOperations()) {
             log.warn("【安全】resetCash 已被配置禁止（fuli.allow-dangerous-operations=false），拒绝执行: userId={}", userId);
             return Result.error("该操作已禁用，仅允许在开发/测试环境使用");
+        }
+        if (newCash == null || newCash.signum() < 0) {
+            return Result.error(BizCode.PARAM_ERROR, "余额不能为负数");
         }
         User user = userService.getById(userId);
         if (user == null) {

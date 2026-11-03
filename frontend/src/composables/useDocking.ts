@@ -3,11 +3,12 @@
  * 管理面板的最小化/关闭/激活，以及底部 dock 栏的顺序
  */
 import { Component, reactive, computed, readonly, markRaw } from 'vue'
+import type { IconName } from '@/components/ui/icons'
 
 export interface DockPanel {
   id: string
   title: string
-  icon?: string
+  icon?: IconName
   component: Component
   minimized: boolean
   closed: boolean
@@ -33,7 +34,7 @@ export function useDocking() {
       .filter(p => !!p)
   )
 
-  const registerPanel = (id: string, title: string, component: Component, icon?: string) => {
+  const registerPanel = (id: string, title: string, component: Component, icon?: IconName) => {
     if (panels[id]) return
     const order = Object.keys(panels).length
     panels[id] = { id, title, icon, component: markRaw(component), minimized: false, closed: false, order }

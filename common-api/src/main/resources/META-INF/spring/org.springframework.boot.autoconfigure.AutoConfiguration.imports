@@ -1,2 +1,4 @@
 com.fuli.common.api.config.JwtAutoConfiguration
 com.fuli.common.api.config.InternalKeyAutoConfiguration
+com.fuli.common.api.config.TraceIdAutoConfiguration
+com.fuli.common.api.config.TokenBlacklistAutoConfiguration

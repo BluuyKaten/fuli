@@ -1,6 +1,9 @@
 package com.fuli.trade.service;
 
+import com.fuli.trade.entity.PositionSummary;
+
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * 持仓汇总服务接口
@@ -36,4 +39,10 @@ public interface PositionSummaryService {
      * 查询当前加权平均成本
      */
     BigDecimal getAvgCost(Long userId, String stockCode);
+
+    /** 根据尚未删除的交易重建持仓数量和加权成本。与交易删除在同一事务中执行。 */
+    void rebuildPosition(Long userId, String stockCode, String stockName);
+
+    /** 查询用户所有持仓（数量 > 0），供 analysis-service 复用成本口径。 */
+    List<PositionSummary> listByUser(Long userId);
 }

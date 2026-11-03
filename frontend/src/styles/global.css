@@ -1,0 +1,630 @@
+/**
+ * 全局样式 —— 深空霓虹主题的底色与 Ant Design 覆盖层。
+ *
+ * 说明：AntD 的样式由 CSS-in-JS 在运行时注入 <head> 末尾，
+ * 静态 CSS 优先级低于它，因此组件级覆盖仍需 !important。
+ * 这里只做「统一外观」，不承载任何业务布局。
+ */
+
+/* ============================================================
+ * 0. 基础
+ * ============================================================ */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font-family: var(--term-font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 深空底：两团极淡的辉光，避免大面积纯黑显得死板 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(760px 520px at 12% -8%, rgba(56, 189, 248, 0.1), transparent 60%),
+    radial-gradient(680px 480px at 92% 4%, rgba(167, 139, 250, 0.09), transparent 62%),
+    radial-gradient(900px 620px at 50% 118%, rgba(56, 189, 248, 0.05), transparent 65%);
+}
+
+#app {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100vh;
+}
+
+::selection {
+  background: rgba(56, 189, 248, 0.28);
+  color: #fff;
+}
+
+/* 数字统一等宽，避免跳动时宽度抖动 */
+.tabular,
+.ant-statistic-content-value,
+.ant-table-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+ * 1. 滚动条
+ * ============================================================ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--term-border-strong);
+  border-radius: 4px;
+  transition: background var(--term-dur-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--term-accent);
+  box-shadow: 0 0 8px var(--term-glow);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ============================================================
+ * 2. AntD 卡片：霓虹描边 + 顶部渐变高光
+ * ============================================================ */
+.ant-card {
+  background: var(--term-panel-bg) !important;
+  border-color: var(--term-border) !important;
+  border-radius: var(--term-radius) !important;
+  transition:
+    border-color var(--term-dur) var(--term-ease),
+    box-shadow var(--term-dur) var(--term-ease),
+    transform var(--term-dur) var(--term-ease);
+}
+
+.ant-card:hover {
+  border-color: var(--term-border-strong) !important;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.12), 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.ant-card-head {
+  position: relative;
+  background: var(--term-panel-header) !important;
+  border-bottom-color: var(--term-border) !important;
+  color: var(--term-fg) !important;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  min-height: 42px;
+}
+
+/* 卡片标题下一道极细的渐变光 */
+.ant-card-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--term-grad-line);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.ant-card-body {
+  color: var(--term-fg);
+}
+
+/* ============================================================
+ * 3. 表格
+ * ============================================================ */
+.ant-table {
+  background: transparent !important;
+}
+
+.ant-table-thead > tr > th {
+  background: var(--term-panel-header) !important;
+  color: var(--term-fg-muted) !important;
+  border-bottom-color: var(--term-border) !important;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom-color: var(--term-border) !important;
+  color: var(--term-fg) !important;
+  transition: background var(--term-dur-fast);
+}
+
+.ant-table-tbody > tr:hover > td,
+.ant-table-cell-row-hover {
+  background: var(--term-hover) !important;
+}
+
+.ant-table-placeholder {
+  background: transparent !important;
+}
+
+.ant-table-placeholder .ant-empty-description {
+  color: var(--term-fg-muted) !important;
+}
+
+/* ============================================================
+ * 4. 按钮：主按钮渐变 + 发光
+ * ============================================================ */
+.ant-btn {
+  font-family: inherit;
+  transition:
+    transform var(--term-dur-fast) var(--term-ease),
+    box-shadow var(--term-dur-fast) var(--term-ease),
+    background var(--term-dur-fast),
+    border-color var(--term-dur-fast);
+}
+
+.ant-btn-primary {
+  background: var(--term-grad) !important;
+  border: none !important;
+  color: #05101f !important;
+  font-weight: 600;
+  box-shadow: 0 2px 14px rgba(56, 189, 248, 0.25);
+}
+
+.ant-btn-primary:not(:disabled):hover {
+  box-shadow: 0 4px 22px rgba(56, 189, 248, 0.42);
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.ant-btn-primary:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+}
+
+.ant-btn-default {
+  background: var(--term-panel-header) !important;
+  border-color: var(--term-border) !important;
+  color: var(--term-fg) !important;
+}
+
+.ant-btn-default:not(:disabled):hover {
+  background: var(--term-hover) !important;
+  border-color: var(--term-accent) !important;
+  color: var(--term-accent) !important;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.16);
+}
+
+.ant-btn-sm {
+  font-size: 12px;
+}
+
+/* 危险按钮保留纯色，不发光，避免与「涨」混淆 */
+.ant-btn-dangerous.ant-btn-primary {
+  background: var(--term-danger) !important;
+  color: #fff !important;
+  box-shadow: none;
+}
+
+/* ============================================================
+ * 5. 表单控件
+ * ============================================================ */
+.ant-input,
+.ant-input-number,
+.ant-select-selector,
+.ant-picker,
+.ant-input-affix-wrapper {
+  background: var(--term-bg-deep) !important;
+  border-color: var(--term-border) !important;
+  color: var(--term-fg) !important;
+  transition: border-color var(--term-dur-fast), box-shadow var(--term-dur-fast);
+}
+
+.ant-input:hover,
+.ant-input-number:hover,
+.ant-select-selector:hover,
+.ant-picker:hover,
+.ant-input-affix-wrapper:hover {
+  border-color: var(--term-border-strong) !important;
+}
+
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-affix-wrapper-focused,
+.ant-input-number-focused,
+.ant-select-focused .ant-select-selector,
+.ant-picker-focused {
+  border-color: var(--term-accent) !important;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14) !important;
+}
+
+.ant-input::placeholder,
+.ant-select-selection-placeholder {
+  color: var(--term-fg-dim) !important;
+}
+
+.ant-form-item-label > label {
+  color: var(--term-fg-muted) !important;
+  font-size: 12px;
+}
+
+.ant-form-item-explain-error {
+  color: var(--term-danger) !important;
+}
+
+/* ============================================================
+ * 6. 其余组件统一
+ * ============================================================ */
+.ant-statistic-title {
+  color: var(--term-fg-muted) !important;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+
+.ant-statistic-content {
+  color: var(--term-fg) !important;
+  font-family: var(--term-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ant-card-meta-title,
+.ant-card-meta-description {
+  color: var(--term-fg) !important;
+}
+
+.ant-empty-description {
+  color: var(--term-fg-muted) !important;
+}
+
+.ant-empty-img-simple-ellipse,
+.ant-empty-img-simple-path,
+.ant-empty-img-simple-g {
+  fill: var(--term-border) !important;
+  stroke: var(--term-border-strong) !important;
+}
+
+/* 空状态：隐藏 AntD 默认的浅灰 3D 插画，换成与主题一致的霓虹线性图标 */
+.ant-empty-image {
+  display: none !important;
+}
+
+.ant-empty::before {
+  content: '';
+  display: block;
+  flex: 0 0 auto;
+  align-self: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 10px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 19.5h17'/%3E%3Cpath d='M7 19.5V11M12 19.5V5.5M17 19.5v-5.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 26px 26px;
+  opacity: 0.5;
+}
+
+.ant-tabs-tab {
+  color: var(--term-fg-muted) !important;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--term-accent) !important;
+}
+
+.ant-tabs-ink-bar {
+  background: var(--term-grad) !important;
+  height: 2px !important;
+}
+
+.ant-alert {
+  background: var(--term-panel-header) !important;
+  border-color: var(--term-border) !important;
+  border-radius: var(--term-radius) !important;
+}
+
+.ant-alert-error {
+  border-color: rgba(244, 63, 94, 0.42) !important;
+  box-shadow: 0 0 22px rgba(244, 63, 94, 0.1);
+}
+
+.ant-alert-warning {
+  border-color: rgba(251, 191, 36, 0.36) !important;
+}
+
+.ant-alert-message {
+  color: var(--term-fg) !important;
+}
+
+.ant-alert-description {
+  color: var(--term-fg-muted) !important;
+}
+
+.ant-divider {
+  border-color: var(--term-border) !important;
+}
+
+.ant-spin-dot-item {
+  background: var(--term-accent) !important;
+}
+
+.ant-spin-text {
+  color: var(--term-fg-muted) !important;
+}
+
+.ant-message-notice-content {
+  background: var(--term-bg-elevated) !important;
+  color: var(--term-fg) !important;
+  border: 1px solid var(--term-border-strong) !important;
+  box-shadow: var(--term-shadow) !important;
+  border-radius: var(--term-radius) !important;
+}
+
+.ant-popover-inner,
+.ant-popover-title,
+.ant-popover-inner-content {
+  background: var(--term-panel-bg) !important;
+  color: var(--term-fg) !important;
+}
+
+.ant-tooltip-inner {
+  background: var(--term-bg-elevated) !important;
+  color: var(--term-fg) !important;
+  border: 1px solid var(--term-border-strong);
+  font-size: 12px;
+}
+
+.ant-checkbox-wrapper,
+.ant-radio-wrapper {
+  color: var(--term-fg) !important;
+}
+
+.ant-input-password-icon,
+.ant-picker-suffix {
+  color: var(--term-fg-muted) !important;
+}
+
+.ant-result-title {
+  color: var(--term-fg) !important;
+}
+
+.ant-result-subtitle {
+  color: var(--term-fg-muted) !important;
+}
+
+.ant-progress-text {
+  color: var(--term-fg) !important;
+}
+
+.ant-tag {
+  background: var(--term-panel-header) !important;
+  border-color: var(--term-border) !important;
+  color: var(--term-fg) !important;
+  border-radius: var(--term-radius-sm) !important;
+}
+
+.ant-select-dropdown {
+  background: var(--term-panel-bg) !important;
+  border: 1px solid var(--term-border) !important;
+  box-shadow: var(--term-shadow) !important;
+}
+
+.ant-select-item {
+  color: var(--term-fg) !important;
+}
+
+.ant-select-item-option-active {
+  background: var(--term-hover) !important;
+}
+
+.ant-select-item-option-selected {
+  background: var(--term-active) !important;
+  color: var(--term-accent) !important;
+}
+
+.ant-picker-panel,
+.ant-picker-header,
+.ant-picker-body {
+  background: var(--term-panel-bg) !important;
+}
+
+.ant-picker-cell {
+  color: var(--term-fg) !important;
+}
+
+.ant-modal-content,
+.ant-modal-header {
+  background: var(--term-panel-bg) !important;
+}
+
+.ant-modal-content {
+  border: 1px solid var(--term-border-strong);
+  box-shadow: var(--term-shadow);
+}
+
+.ant-modal-title,
+.ant-form-item-label > label {
+  color: var(--term-fg) !important;
+}
+
+.ant-menu {
+  font-family: inherit;
+}
+
+.ant-menu-item {
+  transition: background var(--term-dur-fast), color var(--term-dur-fast);
+}
+
+/* 下拉菜单（顶栏用户菜单） */
+.ant-dropdown-menu {
+  background: var(--term-panel-bg) !important;
+  border: 1px solid var(--term-border-strong);
+  box-shadow: var(--term-shadow) !important;
+  padding: 4px !important;
+}
+
+.ant-dropdown-menu-item {
+  color: var(--term-fg) !important;
+  border-radius: var(--term-radius-sm) !important;
+}
+
+.ant-dropdown-menu-item:hover {
+  background: var(--term-hover) !important;
+  color: var(--term-accent) !important;
+}
+
+/* ============================================================
+ * 7. 通用工具类与动效
+ * ============================================================ */
+.text-gradient {
+  background: var(--term-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.text-up {
+  color: var(--term-up);
+}
+
+.text-down {
+  color: var(--term-down);
+}
+
+.text-muted {
+  color: var(--term-fg-muted);
+}
+
+.mono {
+  font-family: var(--term-font-mono);
+}
+
+/* 页面标题：统一线性图标 + 文字，替代原先标题里的 emoji */
+.page-title {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-title .app-icon {
+  color: var(--term-accent);
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4));
+}
+
+.page-subtitle {
+  color: var(--term-fg-muted);
+}
+
+/* 扫描线：用于强调「实时」的区块，极淡，不干扰读数据 */
+@keyframes neon-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@keyframes neon-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes neon-shimmer {
+  0% {
+    background-position: -420px 0;
+  }
+  100% {
+    background-position: 420px 0;
+  }
+}
+
+@keyframes neon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes neon-grid-flow {
+  from {
+    background-position: 0 0, 0 0;
+  }
+  to {
+    background-position: 0 32px, 32px 0;
+  }
+}
+
+/* 系统开启减弱动效时，关掉所有纯 CSS 装饰动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* 打印：仅输出复盘报告内容，隐藏应用外壳，并强制浅色以便打印/导出 PDF */
+@media print {
+  .terminal-toolbar,
+  .terminal-sidebar,
+  .terminal-dock,
+  .main-grid,
+  .no-print {
+    display: none !important;
+  }
+  .terminal-root,
+  .terminal-main,
+  .page-host {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .report-content,
+  .report-content * {
+    color: #000 !important;
+    background: transparent !important;
+    border-color: rgba(0, 0, 0, 0.15) !important;
+  }
+  .report-content .metric {
+    background: #f5f5f5 !important;
+    border-color: #ddd !important;
+  }
+  .report-content .pnl-up {
+    color: #c0392b !important;
+  }
+  .report-content .pnl-down {
+    color: #27ae60 !important;
+  }
+}

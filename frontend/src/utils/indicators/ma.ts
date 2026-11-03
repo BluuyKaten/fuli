@@ -1,7 +1,7 @@
 // ma.ts
-import type { CandleItem } from '@/types/indicators'
+import type { ClosePrice } from '@/types/indicators'
 
-export function calcMA(data: CandleItem[], period: number): number[] {
+export function calcMA(data: ClosePrice[], period: number): number[] {
   if (period <= 0 || data.length === 0) return []
   const result: number[] = []
   for (let i = 0; i < data.length; i++) {

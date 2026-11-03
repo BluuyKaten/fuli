@@ -41,7 +41,7 @@ public class SyncProgressManager {
         progress.setStartDate(startDate);
         progress.setEndDate(endDate);
         progress.setTotalDays(totalDays);
-        progress.setStatus(SyncProgress.SyncStatus.PENDING);
+        progress.setStatus(SyncProgress.TaskStatus.PENDING);
         progress.setMessage("任务创建中...");
         progress.calculatePercent();
 
@@ -80,7 +80,7 @@ public class SyncProgressManager {
         if (progress == null) {
             return;
         }
-        progress.setStatus(SyncProgress.SyncStatus.COMPLETED);
+        progress.setStatus(SyncProgress.TaskStatus.COMPLETED);
         progress.setProcessedDays(progress.getTotalDays());
         progress.calculatePercent();
         progress.setEndTime(LocalDateTime.now());
@@ -93,7 +93,7 @@ public class SyncProgressManager {
     /**
      * 更新任务状态
      */
-    public void updateTaskStatus(String taskId, SyncProgress.SyncStatus status, String message) {
+    public void updateTaskStatus(String taskId, SyncProgress.TaskStatus status, String message) {
         SyncProgress progress = progressMap.get(taskId);
         if (progress == null) {
             return;
@@ -113,7 +113,7 @@ public class SyncProgressManager {
         if (progress == null) {
             return;
         }
-        progress.setStatus(SyncProgress.SyncStatus.FAILED);
+        progress.setStatus(SyncProgress.TaskStatus.FAILED);
         progress.setMessage(errorMessage);
         progress.setErrorDetail(errorDetail);
         progress.setEndTime(LocalDateTime.now());
@@ -150,8 +150,8 @@ public class SyncProgressManager {
         }
 
         // 如果任务已结束,直接关闭连接
-        if (progress.getStatus() == SyncProgress.SyncStatus.COMPLETED
-                || progress.getStatus() == SyncProgress.SyncStatus.FAILED) {
+        if (progress.getStatus() == SyncProgress.TaskStatus.COMPLETED
+                || progress.getStatus() == SyncProgress.TaskStatus.FAILED) {
             try {
                 emitter.complete();
             } catch (Exception e) {

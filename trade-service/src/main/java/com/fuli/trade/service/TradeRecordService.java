@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
 import com.fuli.trade.entity.TradeRecord;
@@ -40,4 +41,7 @@ public interface TradeRecordService extends IService<TradeRecord> {
     StatisticsVO getStatistics(TradeQueryDTO queryDTO);
 
     boolean clearAllByUserId(Long userId);
+
+    /** 查询用户所有持仓（复用 position_summary 成本口径，含 T+1 可卖数量）。 */
+    List<PositionVO> getUserPositions(Long userId);
 }

@@ -27,10 +27,10 @@
               <div class="pos-code">{{ pos.stockCode }}</div>
             </td>
             <td style="text-align: right">{{ pos.holdingQuantity.toLocaleString() }}</td>
-            <td style="text-align: right">{{ pos.avgCost?.toFixed(2) || '-' }}</td>
+            <td style="text-align: right">{{ pos.costPrice?.toFixed(2) || '-' }}</td>
             <td style="text-align: right">{{ pos.currentPrice?.toFixed(2) || '-' }}</td>
-            <td style="text-align: right" :class="{ up: (pos.profitLoss || 0) >= 0, down: (pos.profitLoss || 0) < 0 }">
-              {{ pos.profitLoss != null ? (pos.profitLoss >= 0 ? '+' : '') + pos.profitLoss.toFixed(2) : '-' }}
+            <td style="text-align: right" :class="{ up: (pos.floatingProfitLoss || 0) >= 0, down: (pos.floatingProfitLoss || 0) < 0 }">
+              {{ pos.floatingProfitLoss != null ? (pos.floatingProfitLoss >= 0 ? '+' : '') + pos.floatingProfitLoss.toFixed(2) : '-' }}
             </td>
           </tr>
         </tbody>

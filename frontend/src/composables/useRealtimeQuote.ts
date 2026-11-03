@@ -31,7 +31,10 @@ const connect = () => {
   if (socket && socket.readyState <= WebSocket.OPEN) return
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.hostname}:${WS_PORT}/ws/quotes`
+  const token = localStorage.getItem('token')
+  const wsUrl = `${protocol}//${window.location.hostname}:${WS_PORT}/ws/quotes${
+    token ? `?token=${encodeURIComponent(token)}` : ''
+  }`
 
   socket = new WebSocket(wsUrl)
 

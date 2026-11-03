@@ -44,3 +44,8 @@ logs/
 ### 前端构建产物与依赖(禁止提交) ###
 node_modules/
 frontend/dist/
+frontend/.browser-smoke/
+*.tsbuildinfo
+
+### 助手工作记忆（不提交） ###
+.workbuddy/

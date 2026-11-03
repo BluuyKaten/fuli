@@ -312,7 +312,7 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         AtomicInteger requestCountInMinute = new AtomicInteger(0);
         long minuteStartTime = startTime;
 
-        progressManager.updateTaskStatus(taskId, SyncProgress.SyncStatus.RUNNING, "同步开始...");
+        progressManager.updateTaskStatus(taskId, SyncProgress.TaskStatus.RUNNING, "同步开始...");
 
         LocalDate current = start;
         while (!current.isAfter(end)) {
@@ -327,7 +327,7 @@ public class TushareSyncServiceImpl implements TushareSyncService {
                 }
                 if (requestCountInMinute.get() >= MAX_REQUESTS_PER_MINUTE) {
                     long waitMs = 60000 - (now - minuteStartTime);
-                    progressManager.updateTaskStatus(taskId, SyncProgress.SyncStatus.RUNNING,
+                    progressManager.updateTaskStatus(taskId, SyncProgress.TaskStatus.RUNNING,
                             "达到频率限制,等待 " + (waitMs / 1000) + " 秒...");
                     log.info("达到每分钟请求上限 {}, 等待 {} ms", MAX_REQUESTS_PER_MINUTE, waitMs);
                     Thread.sleep(waitMs);
@@ -426,11 +426,16 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         int successDays = 0;
         AtomicInteger totalCount = new AtomicInteger(0);
 
+        MinuteRateLimiter rateLimiter = new MinuteRateLimiter(MAX_REQUESTS_PER_MINUTE);
         for (String tradeDate : tradeDates) {
             try {
+                rateLimiter.acquire(); // 重试路径同样受每分钟限速约束
                 int count = syncDailyDataByTradeDateInternal(tradeDate);
                 successDays++;
                 totalCount.addAndGet(count);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
             } catch (Exception e) {
                 retryResult.addFailedDate(tradeDate, e.getMessage());
                 log.warn("重试同步失败: {} -> {}", tradeDate, e.getMessage());
@@ -509,12 +514,19 @@ public class TushareSyncServiceImpl implements TushareSyncService {
 
         // 按交易日逐个同步,避免单次请求数据量超过 Tushare 接口上限
         // (daily 接口不传 ts_code 时返回全市场数据,但单次调用有条数限制)
+        MinuteRateLimiter rateLimiter = new MinuteRateLimiter(MAX_REQUESTS_PER_MINUTE);
         LocalDate current = startDate;
         while (!current.isAfter(endDate)) {
             String tradeDate = current.format(DATE_FMT);
             batchCount++;
             log.info("同步交易日 {} (第 {} 个)", tradeDate, batchCount);
 
+            try {
+                rateLimiter.acquire(); // 增量同步同样受每分钟限速约束
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
             int count = syncDailyDataByTradeDateInternal(tradeDate);
             totalCount += count;
             log.info("交易日 {} 完成, 保存 {} 条, 累计 {} 条", tradeDate, count, totalCount);
@@ -614,24 +626,38 @@ public class TushareSyncServiceImpl implements TushareSyncService {
     }
 
     private void upsertStockInfo(StockInfo stockInfo) {
-        StockInfo existing = stockInfoMapper.selectById(stockInfo.getStockCode());
-        if (existing != null) {
-            stockInfoMapper.updateById(stockInfo);
-        } else {
-            stockInfoMapper.insert(stockInfo);
-        }
+        stockInfoMapper.upsert(stockInfo);
     }
 
     private void upsertDailyData(StockDailyData dailyData) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, dailyData.getStockCode())
-               .eq(StockDailyData::getTradeDate, dailyData.getTradeDate());
-        StockDailyData existing = stockDailyDataMapper.selectOne(wrapper);
-        if (existing != null) {
-            dailyData.setId(existing.getId());
-            stockDailyDataMapper.updateById(dailyData);
-        } else {
-            stockDailyDataMapper.insert(dailyData);
+        stockDailyDataMapper.upsert(dailyData);
+    }
+
+    /** 每分钟请求限速器（进程内），避免超过 Tushare 接口频率限制。 */
+    private static class MinuteRateLimiter {
+        private final int maxPerMinute;
+        private long minuteStart = System.currentTimeMillis();
+        private int count = 0;
+
+        MinuteRateLimiter(int maxPerMinute) {
+            this.maxPerMinute = maxPerMinute;
+        }
+
+        synchronized void acquire() throws InterruptedException {
+            long now = System.currentTimeMillis();
+            if (now - minuteStart >= 60000) {
+                minuteStart = now;
+                count = 0;
+            }
+            if (count >= maxPerMinute) {
+                long waitMs = 60000 - (now - minuteStart);
+                if (waitMs > 0) {
+                    Thread.sleep(waitMs);
+                }
+                minuteStart = System.currentTimeMillis();
+                count = 0;
+            }
+            count++;
         }
     }
 }

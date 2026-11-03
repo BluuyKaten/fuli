@@ -1,0 +1,64 @@
+/**
+ * 令牌静态兜底（防首屏闪烁）。
+ *
+ * 注意：本文件的值必须与 src/theme/tokens.ts 保持一致；运行时会被 inline style 覆盖。
+ *    正常改色请改 tokens.ts，这里只做同步。
+ */
+
+:root {
+  /* 核心色（兼容旧变量名） */
+  --term-bg: #070a12;
+  --term-fg: #e6edf6;
+  --term-fg-muted: #8b9bb4;
+  --term-accent: #38bdf8;
+  --term-border: #1e2740;
+  --term-hover: #18213a;
+  --term-active: rgba(56, 189, 248, 0.12);
+
+  --term-toolbar-bg: #121a2b;
+  --term-sidebar-bg: #04060c;
+  --term-dock-bg: #04060c;
+  --term-panel-bg: #0f1420;
+  --term-panel-header: #121a2b;
+
+  --term-danger: #f43f5e;
+  --term-success: #22c55e;
+  --term-warning: #fbbf24;
+  --term-info: #38bdf8;
+
+  --term-up: #ff4d6d;
+  --term-down: #00e5a0;
+
+  /* 霓虹扩展 */
+  --term-fg-dim: #5c6b85;
+  --term-bg-deep: #04060c;
+  --term-bg-elevated: #151d30;
+  --term-border-strong: #2a3550;
+  --term-accent-2: #a78bfa;
+
+  --term-grad: linear-gradient(135deg, #38bdf8 0%, #a78bfa 100%);
+  --term-grad-line: linear-gradient(90deg, rgba(56, 189, 248, 0) 0%, #38bdf8 35%, #a78bfa 65%, rgba(167, 139, 250, 0) 100%);
+  --term-grad-panel: linear-gradient(180deg, rgba(56, 189, 248, 0.06) 0%, rgba(0, 0, 0, 0) 42%);
+
+  --term-glow: rgba(56, 189, 248, 0.3);
+  --term-glow-2: rgba(167, 139, 250, 0.26);
+  --term-glow-up: rgba(255, 77, 109, 0.3);
+  --term-glow-down: rgba(0, 229, 160, 0.28);
+
+  --term-grid-line: rgba(56, 189, 248, 0.045);
+  --term-ring: 0 0 0 1px rgba(56, 189, 248, 0.45), 0 0 18px rgba(56, 189, 248, 0.18);
+
+  --term-radius: 8px;
+  --term-radius-sm: 5px;
+  --term-radius-lg: 14px;
+  --term-shadow: 0 14px 38px rgba(0, 0, 0, 0.5);
+  --term-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.35);
+
+  --term-dur-fast: 160ms;
+  --term-dur: 300ms;
+  --term-dur-slow: 520ms;
+  --term-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --term-font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --term-font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+}

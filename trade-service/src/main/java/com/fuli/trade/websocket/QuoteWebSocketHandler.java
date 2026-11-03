@@ -49,6 +49,12 @@ public class QuoteWebSocketHandler extends TextWebSocketHandler {
     public void broadcastQuotes() {
         if (sessions.isEmpty()) return;
 
+        // 交易时段判断：周末不推送（简化处理，不引入交易日历）
+        java.time.DayOfWeek dow = java.time.LocalDate.now().getDayOfWeek();
+        if (dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY) {
+            return;
+        }
+
         try {
             // 查询最新行情（只取有更新的）
             List<RealtimeQuote> quotes = realtimeQuoteMapper.selectList(
@@ -58,17 +64,16 @@ public class QuoteWebSocketHandler extends TextWebSocketHandler {
 
             if (quotes.isEmpty()) return;
 
-            // 组装推送消息
+            // 组装推送消息：每个 quote 只序列化一次，session 循环内复用
             for (RealtimeQuote quote : quotes) {
-                String message = buildQuoteMessage(quote);
-                TextMessage textMessage = new TextMessage(message);
+                TextMessage textMessage = new TextMessage(buildQuoteMessage(quote));
 
                 for (WebSocketSession session : sessions) {
                     if (session.isOpen()) {
                         try {
-                            synchronized (session) {
-                                session.sendMessage(textMessage);
-                            }
+                            // @Scheduled 单线程调度，无并发发送，无需 synchronized；
+                            // 慢连接隔离由 WebSocketConfig 的 sendTimeLimit/bufferSizeLimit 兜底。
+                            session.sendMessage(textMessage);
                         } catch (IOException e) {
                             log.warn("[WebSocket] 发送失败: {}", e.getMessage());
                         }

@@ -1,6 +1,20 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios'
 import { message } from 'ant-design-vue'
 import router from '@/router'
+import { BizError, BIZ_CODE_MESSAGE } from './bizError'
+
+
+/**
+ * 错误提示去重：并发请求同时失败时（例如后端未启动），
+ * 3 秒内相同文案只弹一次，避免满屏重复 toast。
+ */
+let lastError = { text: '', at: 0 }
+const notifyError = (text: string): void => {
+  const now = Date.now()
+  if (text === lastError.text && now - lastError.at < 3000) return
+  lastError = { text, at: now }
+  message.error(text)
+}
 
 const request: AxiosInstance = axios.create({
   baseURL: '/api',
@@ -22,13 +36,13 @@ request.interceptors.response.use(
   (response: AxiosResponse) => {
     const res = response.data
     if (res.code !== 200) {
-      // 业务错误
-      message.error(res.message || '请求失败')
+      // 业务错误：保留 code，让下游可按 BizCode 做差异化处理（如余额不足跳转）
+      notifyError(res.message || BIZ_CODE_MESSAGE[res.code] || '请求失败')
       if (res.code === 401) {
         localStorage.removeItem('token')
         router.push('/login')
       }
-      return Promise.reject(new Error(res.message || 'Error'))
+      return Promise.reject(new BizError(res.code, res.message || BIZ_CODE_MESSAGE[res.code] || '请求失败'))
     }
     return res
   },
@@ -39,22 +53,22 @@ request.interceptors.response.use(
       if (status === 401) {
         localStorage.removeItem('token')
         router.push('/login')
-        message.error('登录已过期，请重新登录')
+        notifyError('登录已过期，请重新登录')
       } else if (status === 403) {
-        message.error('没有权限访问')
+        notifyError('没有权限访问')
       } else if (status === 404) {
-        message.error('请求的资源不存在')
+        notifyError('请求的资源不存在')
       } else if (status >= 500) {
-        message.error('服务器内部错误，请稍后重试')
+        notifyError('服务器内部错误，请稍后重试')
       } else {
-        message.error(error.response.data?.message || '请求失败')
+        notifyError(error.response.data?.message || '请求失败')
       }
     } else if (error.request) {
       // 请求已发出但没有收到响应（网络错误）
-      message.error('网络连接失败，请检查网络')
+      notifyError('网络连接失败，请检查网络')
     } else {
       // 请求配置出错
-      message.error(error.message || '请求失败')
+      notifyError(error.message || '请求失败')
     }
     return Promise.reject(error)
   }

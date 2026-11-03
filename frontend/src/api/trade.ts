@@ -35,6 +35,8 @@ export interface TradeRecordRequest {
   tradeDate?: string
   tradeTime?: string
   remark?: string
+  /** 客户端幂等键：防双击/重试重复提交 */
+  requestId?: string
 }
 
 export interface TradeQueryParams {

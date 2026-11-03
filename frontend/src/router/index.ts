@@ -38,6 +38,36 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'K线图' }
       },
       {
+        path: 'practice',
+        name: 'HistoryPractice',
+        component: () => import('@/views/practice/PracticePage.vue'),
+        meta: { title: '历史交易练习' }
+      },
+      {
+        path: 'journal',
+        name: 'JournalPage',
+        component: () => import('@/views/journal/JournalPage.vue'),
+        meta: { title: '复盘笔记' }
+      },
+      {
+        path: 'alert',
+        name: 'AlertPage',
+        component: () => import('@/views/alert/AlertPage.vue'),
+        meta: { title: '风控预警' }
+      },
+      {
+        path: 'performance',
+        name: 'PerformancePage',
+        component: () => import('@/views/analysis/PerformancePage.vue'),
+        meta: { title: '绩效分析' }
+      },
+      {
+        path: 'report',
+        name: 'ReportPage',
+        component: () => import('@/views/report/ReportPage.vue'),
+        meta: { title: '复盘报告' }
+      },
+      {
         path: 'sync',
         name: 'StockSync',
         component: () => import('@/views/stock/StockSync.vue'),

@@ -1,5 +1,21 @@
 <template>
-  <div class="kline-workspace" ref="workspaceRef">
+  <div ref="workspaceRef" class="kline-workspace">
+    <!-- 标的条：当前股票与现价 -->
+    <div class="ws-statusbar">
+      <div class="sb-left">
+        <span class="sb-symbol">
+          <span class="sb-name">{{ activeStock?.stockName || '未选择标的' }}</span>
+          <span class="sb-code mono">{{ activeStock?.stockCode }}</span>
+        </span>
+        <span class="sb-divider" />
+        <span class="sb-hint">拖拽分隔条可调整面板比例 · 双击标题栏可最小化</span>
+      </div>
+      <div class="sb-right">
+        <span class="sb-label">现价</span>
+        <span ref="priceRef" class="sb-price mono">{{ currentPrice || '--' }}</span>
+      </div>
+    </div>
+
     <!-- 上排 -->
     <div class="ws-row ws-top" :style="{ flex: topRow[0].minimized && topRow[1].minimized ? 0 : vRatio.value }">
       <!-- 左上：自选股 -->
@@ -29,17 +45,13 @@
           :key="activeStock?.stockCode"
           ref="chartRef"
           :stock-code="activeStock?.stockCode || ''"
-          @price-change="currentPrice = $event"
+          @price-change="onPriceChange"
         />
       </div>
     </div>
 
     <!-- 水平分隔条 -->
-    <div
-      class="h-sep"
-      @mousedown="startDragV"
-      @touchstart.prevent="startDragV"
-    />
+    <div class="h-sep" @mousedown="startDragV" @touchstart.prevent="startDragV" />
 
     <!-- 下排 -->
     <div class="ws-row ws-bottom" :style="{ flex: bottomRow[0].minimized && bottomRow[1].minimized ? 0 : 1 - vRatio.value }">
@@ -71,41 +83,41 @@
     </div>
 
     <!-- 最小化面板还原 dock -->
-    <div class="minimized-dock">
-      <span
-        v-for="item in minimizedList"
-        :key="item.id"
-        class="dock-chip"
-        @click="restorePanel(item.id)"
-      >
-        {{ item.icon }} {{ item.title }}
-      </span>
-    </div>
+    <Transition name="dock-fade">
+      <div v-if="minimizedList.length" class="minimized-dock">
+        <span
+          v-for="item in minimizedList"
+          :key="item.id"
+          class="dock-chip"
+          @click="restorePanel(item.id)"
+        >
+          <AppIcon :name="item.icon" :size="12" />
+          {{ item.title }}
+        </span>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useFlexPanels } from '@/composables/useFlexPanels'
 import LightweightChart from './LightweightChart.vue'
 import WatchlistPanel from './WatchlistPanel.vue'
 import PositionPanel from './PositionPanel.vue'
 import TradePanel from './TradePanel.vue'
+import AppIcon from '@/components/ui/AppIcon.vue'
+import type { IconName } from '@/components/ui/icons'
 import type { StockInfo } from '@/types'
 import { toPureCode } from '@/utils/stockCode'
+import { flashTick, revealIn } from '@/theme/motion'
 
-const {
-  topRow,
-  bottomRow,
-  vRatio,
-  resizeHorizontal,
-  resizeVertical,
-  restore
-} = useFlexPanels()
+const { topRow, bottomRow, vRatio, resizeHorizontal, resizeVertical, restore } = useFlexPanels()
 
 const workspaceRef = ref<HTMLElement | null>(null)
 const chartRef = ref<InstanceType<typeof LightweightChart> | null>(null)
 const positionRef = ref<InstanceType<typeof PositionPanel> | null>(null)
+const priceRef = ref<HTMLElement | null>(null)
 
 // 默认展示股票（fallback）：用户未自选时展示此股票，便于新用户快速预览
 const DEFAULT_STOCK = { stockCode: '600519', stockName: '贵州茅台' }
@@ -118,13 +130,26 @@ const _restored = (() => {
       const stock = JSON.parse(stored)
       if (stock?.stockCode) return stock
     }
-  } catch { /* 忽略 */ }
+  } catch {
+    /* 忽略 */
+  }
   return null
 })()
 const activeStock = ref<StockInfo | null>(_restored ?? { ...DEFAULT_STOCK })
-// 标记是否已恢复上次查看的股票（避免 loadDefaultStock 覆盖）
 const hasRestoredStock = !!_restored
 const currentPrice = ref('')
+
+/** 现价跳动方向：只用于闪烁提示，不参与业务判断 */
+let lastPrice = 0
+const onPriceChange = (value: string) => {
+  currentPrice.value = value
+  const next = Number(value)
+  if (!Number.isFinite(next) || next <= 0) return
+  if (lastPrice > 0 && next !== lastPrice) {
+    flashTick(priceRef.value, next > lastPrice ? 'up' : 'down')
+  }
+  lastPrice = next
+}
 
 // 拖拽状态
 const dragging = ref<null | {
@@ -177,9 +202,9 @@ const bindDragEvents = () => {
 
 const onSelectStock = (stock: StockInfo) => {
   activeStock.value = { ...stock, stockCode: toPureCode(stock.stockCode) }
-  // 持久化到 localStorage，刷新后恢复
   localStorage.setItem('lastViewedStock', JSON.stringify(activeStock.value))
-  // LightweightChart 通过 watch 自动响应 stockCode 变化
+  currentPrice.value = ''
+  lastPrice = 0
 }
 
 const onTradeSuccess = () => {
@@ -188,7 +213,6 @@ const onTradeSuccess = () => {
 
 // 默认加载第一只自选股
 const loadDefaultStock = async () => {
-  // 如果已恢复上次查看的股票，不覆盖
   if (hasRestoredStock) return
   try {
     const { getWatchlist } = await import('@/api/watchlist')
@@ -209,11 +233,11 @@ const loadDefaultStock = async () => {
 
 // 最小化的面板列表
 const minimizedList = computed(() => {
-  const list: { id: string; title: string; icon: string }[] = []
-  if (topRow[0].minimized) list.push({ id: 'watchlist', title: '自选股', icon: '📋' })
-  if (topRow[1].minimized) list.push({ id: 'chart', title: 'K线图', icon: '📈' })
-  if (bottomRow[0].minimized) list.push({ id: 'position', title: '持仓', icon: '💼' })
-  if (bottomRow[1].minimized) list.push({ id: 'trade', title: '交易', icon: '💱' })
+  const list: { id: string; title: string; icon: IconName }[] = []
+  if (topRow[0].minimized) list.push({ id: 'watchlist', title: '自选股', icon: 'clipboard' })
+  if (topRow[1].minimized) list.push({ id: 'chart', title: 'K线图', icon: 'candle' })
+  if (bottomRow[0].minimized) list.push({ id: 'position', title: '持仓', icon: 'wallet' })
+  if (bottomRow[1].minimized) list.push({ id: 'trade', title: '交易', icon: 'activity' })
   return list
 })
 
@@ -224,9 +248,20 @@ const restorePanel = (id: string) => {
   else if (id === 'trade') restore(bottomRow, 1, 0.5)
 }
 
-onMounted(() => {
+// 面板淡入：只动 opacity，避免影响 canvas 尺寸
+onMounted(async () => {
   loadDefaultStock()
+  await nextTick()
+  revealIn(workspaceRef.value, '.ws-panel', { y: 0, stagger: 0.06 })
 })
+
+watch(
+  () => activeStock.value?.stockCode,
+  () => {
+    currentPrice.value = ''
+    lastPrice = 0
+  }
+)
 </script>
 
 <style scoped>
@@ -235,35 +270,142 @@ onMounted(() => {
   flex-direction: column;
   height: 100%;
   max-height: 100%;
-  background: var(--term-bg);
+  background: transparent;
   gap: 0;
   user-select: none;
   overflow: hidden;
   box-sizing: border-box;
+  position: relative;
+  padding: 0 8px 8px;
 }
 
+/* ============ 标的条 ============ */
+.ws-statusbar {
+  flex: 0 0 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+  overflow: hidden;
+}
+
+.sb-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sb-symbol {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sb-name {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.4px;
+  color: var(--term-fg);
+  white-space: nowrap;
+}
+
+.sb-code {
+  font-size: 11px;
+  color: var(--term-fg-dim);
+  letter-spacing: 0.6px;
+}
+
+.sb-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--term-border);
+}
+
+.sb-hint {
+  font-size: 11px;
+  color: var(--term-fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sb-right {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.sb-label {
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  color: var(--term-fg-dim);
+}
+
+.sb-price {
+  display: inline-block;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--term-fg);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+}
+
+/* ============ 行与面板 ============ */
 .ws-row {
   display: flex;
   min-height: 0;
-  transition: flex 0.15s;
+  transition: flex 0.22s var(--term-ease);
+  gap: 0;
 }
 
-.ws-top { flex: 0.6; }
-.ws-bottom { flex: 0.4; }
+.ws-top {
+  flex: 0.6;
+}
+
+.ws-bottom {
+  flex: 0.4;
+}
 
 .ws-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   height: 100%;
   overflow: hidden;
+  background: var(--term-panel-bg);
+  border: 1px solid var(--term-border);
+  border-radius: var(--term-radius-sm);
+  transition: border-color var(--term-dur) var(--term-ease), box-shadow var(--term-dur) var(--term-ease);
 }
 
-.ws-row {
-  display: flex;
-  min-height: 0;
-  transition: flex 0.15s;
+/* 每个面板顶部一道极细渐变光，和全站面板语言一致 */
+.ws-panel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--term-grad-line);
+  opacity: 0.45;
+  pointer-events: none;
+  z-index: 3;
+  transition: opacity var(--term-dur);
+}
+
+.ws-panel:hover {
+  border-color: var(--term-border-strong);
+}
+
+.ws-panel:hover::after {
+  opacity: 0.9;
 }
 
 .ws-panel.minimized {
@@ -272,94 +414,117 @@ onMounted(() => {
   overflow: hidden;
 }
 
-/* 水平分隔条（上下排之间） */
+/* ============ 分隔条 ============ */
 .h-sep {
-  height: 5px;
-  flex: 0 0 5px;
-  background: var(--term-border);
+  height: 7px;
+  flex: 0 0 7px;
+  background: transparent;
   cursor: row-resize;
   position: relative;
   z-index: 2;
-  transition: background 0.15s;
-}
-
-.h-sep:hover,
-.h-sep:active {
-  background: var(--term-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .h-sep::after {
   content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-  background: var(--term-fg-muted);
-  opacity: 0.3;
+  width: 46px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--term-border-strong);
+  transition: all var(--term-dur-fast) var(--term-ease);
 }
 
-/* 垂直分隔条（同排左右之间） */
+.h-sep:hover::after,
+.h-sep:active::after {
+  width: 100%;
+  height: 2px;
+  background: var(--term-grad-line);
+  box-shadow: 0 0 10px var(--term-glow);
+}
+
 .v-sep {
-  width: 5px;
-  flex: 0 0 5px;
-  background: var(--term-border);
+  width: 7px;
+  flex: 0 0 7px;
+  background: transparent;
   cursor: col-resize;
   position: relative;
   z-index: 2;
-  transition: background 0.15s;
-}
-
-.v-sep:hover,
-.v-sep:active {
-  background: var(--term-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .v-sep::after {
   content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: var(--term-fg-muted);
-  opacity: 0.3;
+  width: 2px;
+  height: 46px;
+  border-radius: 2px;
+  background: var(--term-border-strong);
+  transition: all var(--term-dur-fast) var(--term-ease);
 }
 
-/* 最小化面板还原栏 */
+.v-sep:hover::after,
+.v-sep:active::after {
+  height: 100%;
+  background: var(--term-grad-line);
+  box-shadow: 0 0 10px var(--term-glow);
+}
+
+/* ============ 最小化 dock ============ */
 .minimized-dock {
   position: absolute;
-  bottom: 8px;
+  bottom: 14px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   gap: 6px;
   z-index: 10;
-  background: var(--term-panel-bg);
-  border: 1px solid var(--term-border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 4px 6px;
+  background: rgba(10, 15, 26, 0.9);
+  border: 1px solid var(--term-border-strong);
+  border-radius: 999px;
+  box-shadow: var(--term-shadow);
+  backdrop-filter: blur(8px);
 }
 
 .dock-chip {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  background: var(--term-bg);
-  border: 1px dashed var(--term-border);
-  border-radius: 4px;
+  gap: 5px;
+  padding: 4px 11px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--term-border-strong);
+  border-radius: 999px;
   font-size: 11px;
   color: var(--term-fg-muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--term-dur-fast) var(--term-ease);
 }
 
 .dock-chip:hover {
-  background: var(--term-hover);
-  color: var(--term-fg);
+  background: var(--term-active);
+  color: var(--term-accent);
   border-style: solid;
-  border-color: var(--term-accent);
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.16);
+}
+
+.dock-fade-enter-active,
+.dock-fade-leave-active {
+  transition: opacity var(--term-dur), transform var(--term-dur) var(--term-ease);
+}
+
+.dock-fade-enter-from,
+.dock-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+
+@media (max-width: 900px) {
+  .sb-hint {
+    display: none;
+  }
 }
 </style>

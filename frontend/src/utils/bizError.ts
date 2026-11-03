@@ -14,6 +14,8 @@ export const BizCode = {
   NOT_LAST_TRADE: 4005,
   /** 资金校验失败 */
   CASH_VALIDATION_FAILED: 4006,
+  /** 重复提交（幂等键冲突） */
+  DUPLICATE_REQUEST: 4007,
 } as const
 
 /** 错误码 → 中文提示映射(兜底,优先使用后端返回的 message) */
@@ -24,6 +26,7 @@ export const BIZ_CODE_MESSAGE: Record<number, string> = {
   [BizCode.MISSING_MARKET_DATA]: '缺少行情数据,请先同步',
   [BizCode.NOT_LAST_TRADE]: '仅允许删除某股票的最后一笔交易',
   [BizCode.CASH_VALIDATION_FAILED]: '资金校验失败,已拒绝交易',
+  [BizCode.DUPLICATE_REQUEST]: '该笔交易已提交，请勿重复操作',
 }
 
 /**

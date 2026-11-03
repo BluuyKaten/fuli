@@ -1,28 +1,100 @@
 <template>
   <div class="terminal-root">
-    <!-- 顶部终端工具栏 -->
+    <!-- ======================= 顶部工具栏 ======================= -->
     <header class="terminal-toolbar">
       <div class="toolbar-left">
-        <span class="terminal-logo">📈 股票终端</span>
-        <span class="toolbar-time">{{ currentTime }}</span>
+        <!-- 品牌标识 -->
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none">
+              <path d="M4 15.5 9.2 9l3.6 4.2L20 5" stroke="url(#bg1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M4 20h16" stroke="url(#bg1)" stroke-width="1.4" stroke-linecap="round" opacity=".45" />
+              <defs>
+                <linearGradient id="bg1" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#38bdf8" />
+                  <stop offset="1" stop-color="#a78bfa" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </span>
+          <span class="brand-text">
+            <b>复利 <em>TERMINAL</em></b>
+          </span>
+        </div>
+
+        <span class="toolbar-sep" aria-hidden="true" />
+
+        <!-- 快速跳转 -->
+        <div class="quick-jump" :class="{ 'is-open': searchOpen }">
+          <span class="qj-icon"><AppIcon name="search" :size="14" /></span>
+          <input
+            ref="searchRef"
+            v-model="query"
+            class="qj-input"
+            type="text"
+            placeholder="跳转页面…"
+            spellcheck="false"
+            @focus="searchOpen = true"
+            @blur="onSearchBlur"
+            @keydown.enter.prevent="onSearchEnter"
+            @keydown.esc="closeSearch"
+          />
+          <kbd class="qj-kbd" @click="focusSearch">Ctrl K</kbd>
+
+          <Transition name="qj-fade">
+            <div v-if="searchOpen && results.length" class="qj-panel">
+              <button
+                v-for="(item, idx) in results"
+                :key="item.key"
+                class="qj-item"
+                :class="{ 'is-active': idx === activeIndex }"
+                @mousedown.prevent="go(item.key)"
+                @mouseenter="activeIndex = idx"
+              >
+                <AppIcon :name="item.icon" :size="14" />
+                <span>{{ item.label }}</span>
+                <span class="qj-path">{{ item.path }}</span>
+              </button>
+            </div>
+          </Transition>
+        </div>
       </div>
+
       <div class="toolbar-right">
-        <a-dropdown trigger="['click']">
+        <!-- 市场状态 -->
+        <span class="status-chip" :class="`is-${marketStatus.tone}`">
+          <span class="status-dot" />
+          {{ marketStatus.label }}
+        </span>
+
+        <!-- 在线状态 -->
+        <span class="status-chip is-quiet" :class="{ 'is-offline': !online }" :title="online ? '网络连接正常' : '网络已断开'">
+          <span class="status-dot" />
+          {{ online ? '在线' : '离线' }}
+        </span>
+
+        <span class="toolbar-clock mono">
+          <AppIcon name="clock" :size="13" />
+          {{ currentTime }}
+        </span>
+
+        <a-dropdown trigger="['click']" placement="bottomRight">
           <span class="user-trigger">
             <span class="user-avatar">{{ userInitial }}</span>
             <span class="user-name">{{ userStore.nickname || userStore.username }}</span>
+            <AppIcon name="chevronDown" :size="12" class="user-caret" />
           </span>
           <template #overlay>
             <a-menu class="terminal-menu">
               <a-menu-item key="profile" @click="activatePanel('AccountProfile')">
-                <UserOutlined /> 账户信息
+                <AppIcon name="user" :size="14" /> 账户信息
               </a-menu-item>
               <a-menu-item key="password" @click="showPasswordModal = true">
-                <LockOutlined /> 修改密码
+                <AppIcon name="lock" :size="14" /> 修改密码
               </a-menu-item>
               <a-menu-divider />
               <a-menu-item key="logout" @click="handleLogout">
-                <LogoutOutlined /> 退出登录
+                <AppIcon name="logout" :size="14" /> 退出登录
               </a-menu-item>
             </a-menu>
           </template>
@@ -30,51 +102,73 @@
       </div>
     </header>
 
-    <!-- 主体三栏布局 -->
+    <!-- ======================= 主体 ======================= -->
     <div class="terminal-body">
-      <!-- 左侧：导航面板 -->
-      <aside class="terminal-sidebar">
-        <div class="sidebar-header">导航</div>
-        <div class="sidebar-list">
+      <!-- 左侧导航 -->
+      <aside ref="sidebarRef" class="terminal-sidebar" :class="{ 'is-collapsed': collapsed }">
+        <div class="sidebar-head">
+          <span v-if="!collapsed" class="sidebar-label">工作台</span>
+          <button class="collapse-btn" :title="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar">
+            <AppIcon :name="collapsed ? 'chevronRight' : 'chevronLeft'" :size="14" />
+          </button>
+        </div>
+
+        <nav class="sidebar-list">
           <div
             v-for="item in sideItems"
             :key="item.key"
             class="sidebar-item"
             :class="{ active: activePanelId === item.key }"
+            :title="collapsed ? item.label : undefined"
             @click="onSideNavClick(item.key)"
           >
-            <span class="sidebar-icon">{{ item.icon }}</span>
-            <span>{{ item.label }}</span>
+            <span class="sidebar-indicator" aria-hidden="true" />
+            <span class="sidebar-icon"><AppIcon :name="item.icon" :size="16" /></span>
+            <span class="sidebar-text">{{ item.label }}</span>
           </div>
+        </nav>
+
+        <div class="sidebar-foot">
+          <span v-if="!collapsed" class="sidebar-version mono">v2.0 · neon</span>
         </div>
       </aside>
 
-      <!-- 中央：内容区 -->
+      <!-- 中央内容区 -->
       <main class="terminal-main">
-        <!-- K 线图页面：使用 docking 面板 -->
-        <div v-if="isKlineRoute && activePanel" class="dock-panels">
-          <div class="dock-panel">
-            <div class="panel-header">
-              <span class="panel-title">
-                <span v-if="activePanel.icon" class="panel-icon">{{ activePanel.icon }}</span>
-                {{ activePanel.title }}
-              </span>
-              <div class="panel-actions">
-                <span class="panel-btn" title="最小化" @click="minimizePanel(activePanel.id)">─</span>
-                <span class="panel-btn close-btn" title="关闭" @click="closePanel(activePanel.id)">✕</span>
+        <span class="main-grid" aria-hidden="true" />
+
+        <Transition :css="false" mode="out-in" @enter="onContentEnter" @leave="onContentLeave">
+          <!-- K 线图：docking 面板 -->
+          <div v-if="isKlineRoute && activePanel" :key="`kline:${activePanel.id}`" class="dock-panels">
+            <div class="dock-panel">
+              <div class="panel-header">
+                <span class="panel-title">
+                  <span class="panel-icon"><AppIcon :name="activePanel.icon ?? 'candle'" :size="14" /></span>
+                  {{ activePanel.title }}
+                </span>
+                <div class="panel-actions">
+                  <button class="panel-btn" title="最小化" @click="withFlip(() => minimizePanel(activePanel!.id))">
+                    <AppIcon name="minus" :size="13" />
+                  </button>
+                  <button class="panel-btn close-btn" title="关闭" @click="withFlip(() => closePanel(activePanel!.id))">
+                    <AppIcon name="close" :size="13" />
+                  </button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <component :is="activePanel.component" />
               </div>
             </div>
-            <div class="panel-body">
-              <component :is="activePanel.component" />
-            </div>
           </div>
-        </div>
 
-        <!-- 其他页面：使用 router-view -->
-        <router-view v-else />
+          <!-- 其他页面 -->
+          <div v-else :key="`page:${route.path}`" class="page-host">
+            <router-view />
+          </div>
+        </Transition>
 
-        <!-- 底部 dock 栏（仅 K 线图显示） -->
-        <footer v-if="isKlineRoute && allActivePanels.length > 0" class="terminal-dock">
+        <!-- 底部 dock 栏 -->
+        <footer v-if="isKlineRoute && allActivePanels.length > 0" ref="dockRef" class="terminal-dock">
           <div
             v-for="panel in allActivePanels"
             :key="panel.id"
@@ -82,14 +176,11 @@
             :class="{ minimized: panel.minimized, closed: panel.closed }"
             @click="onDockItemClick(panel)"
           >
-            <span v-if="panel.icon" class="dock-icon">{{ panel.icon }}</span>
+            <span v-if="panel.icon" class="dock-icon"><AppIcon :name="panel.icon" :size="13" /></span>
             <span class="dock-title">{{ panel.title }}</span>
-            <span
-              v-if="!panel.closed"
-              class="dock-close"
-              title="关闭"
-              @click.stop="closePanel(panel.id)"
-            >✕</span>
+            <span v-if="!panel.closed" class="dock-close" title="关闭" @click.stop="withFlip(() => closePanel(panel.id))">
+              <AppIcon name="close" :size="10" />
+            </span>
           </div>
         </footer>
       </main>
@@ -113,41 +204,157 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { LockOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
-import { useUserStore } from '@/stores/user'
-import { changePassword } from '@/api/auth'
-import { useDocking } from '@/composables/useDocking'
 import { message } from 'ant-design-vue'
+import { useUserStore } from '@/stores/user'
+import { changePassword, logoutApi } from '@/api/auth'
+import { useDocking } from '@/composables/useDocking'
+import AppIcon from '@/components/ui/AppIcon.vue'
+import type { IconName } from '@/components/ui/icons'
+import { captureLayout, flipLayout, pageEnter, pageLeave } from '@/theme/motion'
 import DashboardPage from '@/views/dashboard/DashboardPage.vue'
 import KLinePage from '@/views/stock/KLinePage.vue'
 import TradeList from '@/views/trade/TradeList.vue'
 import StockSync from '@/views/stock/StockSync.vue'
 import ProfilePage from '@/views/account/ProfilePage.vue'
+import JournalPage from '@/views/journal/JournalPage.vue'
+import AlertPage from '@/views/alert/AlertPage.vue'
+import PerformancePage from '@/views/analysis/PerformancePage.vue'
 
 const router = useRouter()
 const route = useRoute()
+const userStore = useUserStore()
 
-// 仅在 K 线图路由显示 docking 面板
-const isKlineRoute = computed(() => route.name === 'KlineChart')
+/* ---------------- 导航配置 ---------------- */
+interface NavItem {
+  key: string
+  label: string
+  icon: IconName
+  path: string
+}
 
-// 当前激活的面板（只渲染这一个）
-const activePanel = computed(() => {
-  if (!isKlineRoute.value) return null
-  // K 线图路由默认显示 KlineChart 面板
-  const targetId = activePanelId.value
-  console.log('[BasicLayout] activePanelId:', targetId, 'visiblePanels:', visiblePanels.value.map(p => p.id))
-  const found = visiblePanels.value.find(p => p.id === targetId)
-  if (found) return found
-  // 如果不在可见面板中，找 KlineChart
-  const klinePanel = visiblePanels.value.find(p => p.id === 'KlineChart')
-  if (klinePanel) return klinePanel
-  // 否则返回第一个可见面板
-  return visiblePanels.value[0]
+const sideItems: NavItem[] = [
+  { key: 'Dashboard', label: '仪表盘', icon: 'dashboard', path: '/dashboard' },
+  { key: 'KlineChart', label: 'K线图', icon: 'candle', path: '/kline' },
+  { key: 'HistoryPractice', label: '历史交易练习', icon: 'target', path: '/practice' },
+  { key: 'TradeList', label: '交易记录', icon: 'clipboard', path: '/trade' },
+  { key: 'JournalPage', label: '复盘笔记', icon: 'notebook', path: '/journal' },
+  { key: 'AlertPage', label: '风控预警', icon: 'shield', path: '/alert' },
+  { key: 'PerformancePage', label: '绩效分析', icon: 'trophy', path: '/performance' },
+  { key: 'ReportPage', label: '复盘报告', icon: 'activity', path: '/report' },
+  { key: 'StockSync', label: '数据同步', icon: 'refresh', path: '/sync' },
+  { key: 'AccountProfile', label: '账户信息', icon: 'user', path: '/account' }
+]
+
+/* ---------------- 侧栏折叠 ---------------- */
+const STORAGE_KEY = 'terminal.sidebar.collapsed'
+const sidebarRef = ref<HTMLElement | null>(null)
+const collapsed = ref(localStorage.getItem(STORAGE_KEY) === '1')
+
+const toggleSidebar = () => {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(STORAGE_KEY, collapsed.value ? '1' : '0')
+}
+
+/* ---------------- 快速跳转 ---------------- */
+const searchRef = ref<HTMLInputElement | null>(null)
+const query = ref('')
+const searchOpen = ref(false)
+const activeIndex = ref(0)
+
+const results = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  if (!q) return sideItems
+  return sideItems.filter(
+    (i) => i.label.toLowerCase().includes(q) || i.key.toLowerCase().includes(q) || i.path.includes(q)
+  )
 })
 
-const userStore = useUserStore()
+const focusSearch = () => {
+  searchRef.value?.focus()
+  searchOpen.value = true
+}
+
+const closeSearch = () => {
+  searchOpen.value = false
+  query.value = ''
+  searchRef.value?.blur()
+}
+
+const onSearchBlur = () => {
+  // 延迟关闭，保证点击结果项时 mousedown 先触发
+  window.setTimeout(() => {
+    searchOpen.value = false
+  }, 120)
+}
+
+const go = (key: string) => {
+  closeSearch()
+  onSideNavClick(key)
+}
+
+const onSearchEnter = () => {
+  const target = results.value[activeIndex.value] ?? results.value[0]
+  if (target) go(target.key)
+}
+
+watch(results, () => {
+  activeIndex.value = 0
+})
+
+const onGlobalKeydown = (e: KeyboardEvent) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    focusSearch()
+  }
+}
+
+/* ---------------- 时钟 / 市场状态 / 在线状态 ---------------- */
+const currentTime = ref('')
+const nowMs = ref(Date.now())
+let timer: number | null = null
+
+const updateTime = () => {
+  const d = new Date()
+  nowMs.value = d.getTime()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  currentTime.value = `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+/** A 股交易时段判定 */
+const marketStatus = computed(() => {
+  const d = new Date(nowMs.value)
+  const day = d.getDay()
+  const minutes = d.getHours() * 60 + d.getMinutes()
+  if (day === 0 || day === 6) return { label: '休市', tone: 'closed' as const }
+  if (minutes >= 555 && minutes < 570) return { label: '集合竞价', tone: 'warn' as const }
+  if ((minutes >= 570 && minutes < 690) || (minutes >= 780 && minutes < 900)) {
+    return { label: '交易中', tone: 'live' as const }
+  }
+  if (minutes >= 690 && minutes < 780) return { label: '午间休市', tone: 'warn' as const }
+  if (minutes < 555) return { label: '未开盘', tone: 'closed' as const }
+  return { label: '已收盘', tone: 'closed' as const }
+})
+
+const online = ref(navigator.onLine)
+const syncOnline = () => {
+  online.value = navigator.onLine
+}
+
+/* ---------------- 内容区过渡 ---------------- */
+const isKlineRoute = computed(() => route.name === 'KlineChart')
+
+const onContentEnter = (el: Element, done: () => void) => {
+  // K 线页含 canvas，只做淡入不做位移，避免图表尺寸抖动
+  pageEnter(el, done, { fade: isKlineRoute.value })
+}
+
+const onContentLeave = (el: Element, done: () => void) => {
+  pageLeave(el, done)
+}
+
+/* ---------------- docking ---------------- */
 const {
   visiblePanels,
   allActivePanels,
@@ -159,38 +366,38 @@ const {
   reopenPanel
 } = useDocking()
 
-const currentTime = ref('')
-let timer: number | null = null
-
-// 当前激活的面板（高亮用）
 const activePanelId = ref('Dashboard')
+const dockRef = ref<HTMLElement | null>(null)
 
-// 监听路由变化，切换到对应面板
-watch(() => route.name, (name) => {
-  const nameMap: Record<string, string> = {
-    Dashboard: 'Dashboard',
-    TradeList: 'TradeList',
-    KlineChart: 'KlineChart',
-    StockSync: 'StockSync',
-    AccountProfile: 'AccountProfile'
-  }
-  const panelId = nameMap[name as string]
-  if (panelId) {
-    activePanelId.value = panelId
-    if (name === 'KlineChart') {
-      restorePanel('KlineChart')
+const activePanel = computed(() => {
+  if (!isKlineRoute.value) return null
+  const found = visiblePanels.value.find((p) => p.id === activePanelId.value)
+  if (found) return found
+  return visiblePanels.value.find((p) => p.id === 'KlineChart') ?? visiblePanels.value[0]
+})
+
+/** 执行会改变 dock 项数量的操作，并用 Flip 让重排有动画 */
+const withFlip = async (fn: () => void) => {
+  const items = dockRef.value?.querySelectorAll('.dock-item')
+  const state = items && items.length ? captureLayout(items) : null
+  fn()
+  await nextTick()
+  flipLayout(state)
+}
+
+watch(
+  () => route.name,
+  (name) => {
+    const panelId = String(name)
+    if (sideItems.some((i) => i.key === panelId)) {
+      activePanelId.value = panelId
+      if (name === 'KlineChart') restorePanel('KlineChart')
     }
-  }
-}, { immediate: true })
+  },
+  { immediate: true }
+)
 
-const sideItems = [
-  { key: 'Dashboard', label: '仪表盘', icon: '📊' },
-  { key: 'KlineChart', label: 'K线图', icon: '📈' },
-  { key: 'TradeList', label: '交易记录', icon: '📋' },
-  { key: 'StockSync', label: '数据同步', icon: '🔄' },
-  { key: 'AccountProfile', label: '账户信息', icon: '👤' }
-]
-
+/* ---------------- 用户 ---------------- */
 const userInitial = computed(() => (userStore.nickname || userStore.username || '?')[0]?.toUpperCase() || '?')
 
 const showPasswordModal = ref(false)
@@ -201,13 +408,12 @@ const passwordForm = reactive({
   confirmPassword: ''
 })
 
-const updateTime = () => {
-  const d = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  currentTime.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
-const handleLogout = () => {
+const handleLogout = async () => {
+  try {
+    await logoutApi()
+  } catch {
+    // 忽略登出接口失败：本地仍清除令牌，令牌黑名单由后端尽力而为
+  }
   userStore.clearToken()
   router.push('/login')
 }
@@ -233,7 +439,7 @@ const handleChangePassword = async () => {
     passwordForm.oldPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmPassword = ''
-    setTimeout(() => {
+    window.setTimeout(() => {
       userStore.clearToken()
       router.push('/login')
     }, 1000)
@@ -244,174 +450,488 @@ const handleChangePassword = async () => {
   }
 }
 
-// 侧边栏导航点击：K 线图用 docking，其他用路由
+/* ---------------- 导航点击 ---------------- */
 const onSideNavClick = (key: string) => {
-  if (key === 'KlineChart') {
-    activatePanel(key)
-    router.push('/kline')
-  } else if (key === 'Dashboard') {
-    router.push('/dashboard')
-  } else if (key === 'TradeList') {
-    router.push('/trade')
-  } else if (key === 'StockSync') {
-    router.push('/sync')
-  } else if (key === 'AccountProfile') {
-    router.push('/account')
-  }
+  const item = sideItems.find((i) => i.key === key)
+  if (!item) return
+  if (key === 'KlineChart') activatePanel(key)
+  router.push(item.path)
 }
 
-// dock 栏点击：已关闭则恢复，已最小化则还原，否则最小化
 const onDockItemClick = (panel: { id: string; closed: boolean; minimized: boolean }) => {
-  if (panel.closed) {
-    reopenPanel(panel.id)
-    activePanelId.value = panel.id
-  } else if (panel.minimized) {
-    restorePanel(panel.id)
-    activePanelId.value = panel.id
-  } else {
-    minimizePanel(panel.id)
-  }
+  withFlip(() => {
+    if (panel.closed) {
+      reopenPanel(panel.id)
+      activePanelId.value = panel.id
+    } else if (panel.minimized) {
+      restorePanel(panel.id)
+      activePanelId.value = panel.id
+    } else {
+      minimizePanel(panel.id)
+    }
+  })
 }
 
 onMounted(() => {
   updateTime()
   timer = window.setInterval(updateTime, 1000)
-  // 注册所有面板，每个面板绑定自己的组件
-  registerPanel('Dashboard', '仪表盘', DashboardPage, '📊')
-  registerPanel('TradeList', '交易记录', TradeList, '📋')
-  registerPanel('KlineChart', 'K线图', KLinePage, '📈')
-  registerPanel('StockSync', '数据同步', StockSync, '🔄')
-  registerPanel('AccountProfile', '账户信息', ProfilePage, '👤')
+  window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('online', syncOnline)
+  window.addEventListener('offline', syncOnline)
+
+  registerPanel('Dashboard', '仪表盘', DashboardPage, 'dashboard')
+  registerPanel('TradeList', '交易记录', TradeList, 'clipboard')
+  registerPanel('KlineChart', 'K线图', KLinePage, 'candle')
+  registerPanel('JournalPage', '复盘笔记', JournalPage, 'notebook')
+  registerPanel('AlertPage', '风控预警', AlertPage, 'shield')
+  registerPanel('PerformancePage', '绩效分析', PerformancePage, 'trophy')
+  registerPanel('StockSync', '数据同步', StockSync, 'refresh')
+  registerPanel('AccountProfile', '账户信息', ProfilePage, 'user')
 })
 
 onBeforeUnmount(() => {
   if (timer !== null) clearInterval(timer)
+  window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('online', syncOnline)
+  window.removeEventListener('offline', syncOnline)
 })
 </script>
 
 <style scoped>
-/* ... existing styles ... */
 .terminal-root {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--term-bg);
+  background: transparent;
   color: var(--term-fg);
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--term-font-sans);
 }
 
-/* ========== 顶部工具栏 ========== */
+/* ======================= 工具栏 ======================= */
 .terminal-toolbar {
-  height: 44px;
-  flex: 0 0 44px;
+  height: 50px;
+  flex: 0 0 50px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
-  background: var(--term-toolbar-bg);
+  gap: 16px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, rgba(18, 26, 43, 0.96), rgba(10, 15, 26, 0.92));
   border-bottom: 1px solid var(--term-border);
+  backdrop-filter: blur(12px);
   user-select: none;
+  position: relative;
+  z-index: 20;
 }
 
-.toolbar-left, .toolbar-right {
+.terminal-toolbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--term-grad-line);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.toolbar-left,
+.toolbar-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  min-width: 0;
 }
 
-.terminal-logo {
-  font-weight: bold;
-  font-size: 15px;
-  color: var(--term-accent);
-  letter-spacing: 0.5px;
-  margin-right: 16px;
-}
-
-.toolbar-time {
-  font-size: 12px;
-  color: var(--term-fg-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.user-trigger {
+/* 品牌 */
+.brand {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.16);
+}
+
+.brand-text b {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.6px;
+  color: var(--term-fg);
+  white-space: nowrap;
+}
+
+.brand-text em {
+  font-family: var(--term-font-mono);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  color: var(--term-accent);
+  opacity: 0.85;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--term-border);
+}
+
+/* 快速跳转 */
+.quick-jump {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px 0 9px;
+  background: rgba(4, 6, 12, 0.7);
+  border: 1px solid var(--term-border);
+  border-radius: var(--term-radius-sm);
+  width: 230px;
+  transition: border-color var(--term-dur-fast), box-shadow var(--term-dur-fast), width var(--term-dur);
+}
+
+.quick-jump.is-open {
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1);
+  width: 280px;
+}
+
+.qj-icon {
+  color: var(--term-fg-dim);
+  display: inline-flex;
+}
+
+.qj-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--term-fg);
+  font-family: var(--term-font-sans);
+  font-size: 12.5px;
+}
+
+.qj-input::placeholder {
+  color: var(--term-fg-dim);
+}
+
+.qj-kbd {
+  font-family: var(--term-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--term-fg-dim);
+  border: 1px solid var(--term-border);
+  background: rgba(255, 255, 255, 0.03);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.qj-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 4px;
+  background: var(--term-bg-elevated);
+  border: 1px solid var(--term-border-strong);
+  border-radius: var(--term-radius);
+  box-shadow: var(--term-shadow);
+  z-index: 40;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.qj-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--term-radius-sm);
+  background: transparent;
+  color: var(--term-fg-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--term-dur-fast), color var(--term-dur-fast);
+}
+
+.qj-item.is-active {
+  background: var(--term-active);
+  color: var(--term-accent);
+}
+
+.qj-path {
+  margin-left: auto;
+  font-family: var(--term-font-mono);
+  font-size: 10px;
+  color: var(--term-fg-dim);
+}
+
+.qj-fade-enter-active,
+.qj-fade-leave-active {
+  transition: opacity var(--term-dur-fast), transform var(--term-dur-fast);
+}
+
+.qj-fade-enter-from,
+.qj-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+/* 状态指示 */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: var(--term-fg-muted);
+  border: 1px solid var(--term-border);
+  background: rgba(255, 255, 255, 0.02);
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--term-fg-dim);
+  animation: neon-breathe 2.4s var(--term-ease) infinite;
+}
+
+.is-live {
+  color: var(--term-down);
+  border-color: rgba(0, 229, 160, 0.32);
+  background: rgba(0, 229, 160, 0.07);
+}
+
+.is-live .status-dot {
+  background: var(--term-down);
+  box-shadow: 0 0 8px rgba(0, 229, 160, 0.7);
+}
+
+.is-warn {
+  color: var(--term-warning);
+  border-color: rgba(251, 191, 36, 0.3);
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.is-warn .status-dot {
+  background: var(--term-warning);
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+}
+
+.is-closed {
+  color: var(--term-fg-muted);
+}
+
+.is-closed .status-dot {
+  background: var(--term-fg-dim);
+  animation: none;
+  opacity: 0.7;
+}
+
+.is-quiet .status-dot {
+  background: var(--term-success);
+}
+
+.status-chip.is-offline {
+  color: var(--term-danger);
+  border-color: rgba(244, 63, 94, 0.35);
+}
+
+.status-chip.is-offline .status-dot {
+  background: var(--term-danger);
+  animation: neon-breathe 1s infinite;
+}
+
+.toolbar-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--term-fg-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4px;
+}
+
+/* 用户 */
+.user-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  padding: 3px 8px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: background var(--term-dur-fast), border-color var(--term-dur-fast);
 }
 
 .user-trigger:hover {
   background: var(--term-hover);
+  border-color: var(--term-border);
 }
 
 .user-avatar {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--term-accent);
-  color: #fff;
+  background: var(--term-grad);
+  color: #05101f;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
 }
 
 .user-name {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--term-fg);
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* ========== 三栏主体 ========== */
+.user-caret {
+  color: var(--term-fg-dim);
+}
+
+/* ======================= 主体 ======================= */
 .terminal-body {
   flex: 1;
   display: flex;
   min-height: 0;
 }
 
+/* 侧栏 */
 .terminal-sidebar {
-  width: 180px;
-  flex: 0 0 180px;
-  background: var(--term-sidebar-bg);
-  border-right: 1px solid var(--term-border);
+  width: 186px;
+  flex: 0 0 186px;
   display: flex;
   flex-direction: column;
+  background: linear-gradient(180deg, rgba(9, 13, 22, 0.9), rgba(4, 6, 12, 0.92));
+  border-right: 1px solid var(--term-border);
+  overflow: hidden;
+  transition: width 0.28s var(--term-ease), flex-basis 0.28s var(--term-ease);
 }
 
-.sidebar-header {
-  padding: 12px 16px 8px;
-  font-size: 11px;
+.terminal-sidebar.is-collapsed {
+  width: 58px;
+  flex-basis: 58px;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 10px 0 14px;
+  flex: 0 0 40px;
+}
+
+.sidebar-label {
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 1.6px;
   text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--term-fg-muted);
+  color: var(--term-fg-dim);
+  white-space: nowrap;
+}
+
+.collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: var(--term-radius-sm);
+  background: transparent;
+  color: var(--term-fg-dim);
+  cursor: pointer;
+  transition: all var(--term-dur-fast);
+  flex: 0 0 auto;
+}
+
+.collapse-btn:hover {
+  background: var(--term-hover);
+  border-color: var(--term-border);
+  color: var(--term-accent);
+}
+
+.is-collapsed .sidebar-head {
+  padding: 0;
+  justify-content: center;
 }
 
 .sidebar-list {
   flex: 1;
   padding: 4px 8px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .sidebar-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
-  font-size: 13px;
-  border-radius: 4px;
+  height: 36px;
+  padding: 0 10px;
+  margin-bottom: 2px;
+  font-size: 12.5px;
+  border-radius: var(--term-radius-sm);
   cursor: pointer;
   color: var(--term-fg-muted);
-  transition: all 0.15s;
-  margin-bottom: 2px;
+  transition: background var(--term-dur-fast), color var(--term-dur-fast);
+  white-space: nowrap;
 }
 
 .sidebar-item:hover {
   background: var(--term-hover);
   color: var(--term-fg);
+}
+
+.sidebar-item:hover .sidebar-icon {
+  color: var(--term-accent);
+}
+
+/* 激活态：左侧竖条发光 + 极淡底 */
+.sidebar-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 2px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--term-grad);
+  box-shadow: 0 0 10px var(--term-glow);
+  transition: transform var(--term-dur) var(--term-ease);
 }
 
 .sidebar-item.active {
@@ -420,22 +940,97 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-.sidebar-icon {
-  font-size: 14px;
-  width: 18px;
-  text-align: center;
+.sidebar-item.active .sidebar-indicator {
+  transform: translateY(-50%) scaleY(1);
 }
 
+.sidebar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex: 0 0 18px;
+  color: var(--term-fg-muted);
+  transition: color var(--term-dur-fast);
+}
+
+.sidebar-item.active .sidebar-icon {
+  color: var(--term-accent);
+  filter: drop-shadow(0 0 6px var(--term-glow));
+}
+
+.sidebar-text {
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.18s var(--term-ease);
+}
+
+.is-collapsed .sidebar-item {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+
+.is-collapsed .sidebar-text {
+  opacity: 0;
+  width: 0;
+  pointer-events: none;
+}
+
+.is-collapsed .sidebar-indicator {
+  left: 2px;
+}
+
+.sidebar-foot {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-top: 1px solid var(--term-border);
+  min-height: 34px;
+}
+
+.sidebar-version {
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  color: var(--term-fg-dim);
+  opacity: 0.75;
+}
+
+/* 内容区 */
 .terminal-main {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--term-bg);
+  background: transparent;
 }
 
-/* ========== docking 面板 ========== */
+/* 网格底：极淡，跟着视口固定，营造 HUD 质感 */
+.main-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(var(--term-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--term-grid-line) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 20%, transparent 78%);
+}
+
+.page-host {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* ======================= docking 面板 ======================= */
 .dock-panels {
+  position: relative;
+  z-index: 1;
   flex: 1;
   overflow: auto;
   padding: 12px;
@@ -443,57 +1038,78 @@ onBeforeUnmount(() => {
 }
 
 .dock-panel {
-  background: var(--term-panel-bg);
-  border: 1px solid var(--term-border);
-  border-radius: 6px;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 400px;
+  background: var(--term-panel-bg);
+  border: 1px solid var(--term-border);
+  border-radius: var(--term-radius);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.06), var(--term-shadow-sm);
 }
 
 .panel-header {
-  height: 34px;
-  flex: 0 0 34px;
+  height: 36px;
+  flex: 0 0 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
+  padding: 0 8px 0 12px;
   background: var(--term-panel-header);
   border-bottom: 1px solid var(--term-border);
-  border-radius: 6px 6px 0 0;
   user-select: none;
+  position: relative;
+}
+
+.panel-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--term-grad-line);
+  opacity: 0.45;
 }
 
 .panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--term-fg);
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--term-fg);
 }
 
 .panel-icon {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--term-active);
+  color: var(--term-accent);
 }
 
 .panel-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .panel-btn {
-  width: 22px;
-  height: 22px;
-  display: flex;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   color: var(--term-fg-muted);
-  transition: all 0.15s;
+  cursor: pointer;
+  transition: all var(--term-dur-fast);
 }
 
 .panel-btn:hover {
@@ -509,35 +1125,21 @@ onBeforeUnmount(() => {
 .panel-body {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: 12px;
   min-height: 0;
 }
 
-.empty-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--term-fg-muted);
-  font-size: 15px;
-}
-
-.empty-hint {
-  font-size: 12px;
-  opacity: 0.6;
-}
-
-/* ========== 底部 dock 栏 ========== */
+/* ======================= 底部 dock ======================= */
 .terminal-dock {
-  height: 36px;
-  flex: 0 0 36px;
+  position: relative;
+  z-index: 1;
+  height: 38px;
+  flex: 0 0 38px;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   padding: 0 8px;
-  background: var(--term-dock-bg);
+  background: rgba(4, 6, 12, 0.85);
   border-top: 1px solid var(--term-border);
   overflow-x: auto;
 }
@@ -546,30 +1148,49 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  height: 26px;
+  padding: 0 8px 0 10px;
   background: var(--term-panel-bg);
   border: 1px solid var(--term-border);
-  border-radius: 4px;
+  border-radius: var(--term-radius-sm);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--term-fg-muted);
   white-space: nowrap;
-  transition: all 0.15s;
+  transition: all var(--term-dur-fast);
   position: relative;
+  overflow: hidden;
+}
+
+.dock-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: transparent;
 }
 
 .dock-item:hover {
   background: var(--term-hover);
   color: var(--term-fg);
+  border-color: var(--term-border-strong);
 }
 
 .dock-item.minimized {
-  border-bottom: 2px solid var(--term-accent);
   color: var(--term-fg);
+  border-color: rgba(56, 189, 248, 0.35);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.1);
+}
+
+.dock-item.minimized::before {
+  background: var(--term-grad);
+  box-shadow: 0 0 8px var(--term-glow);
 }
 
 .dock-item.closed {
-  opacity: 0.45;
+  opacity: 0.4;
   border-style: dashed;
   background: transparent;
 }
@@ -588,26 +1209,30 @@ onBeforeUnmount(() => {
 }
 
 .dock-icon {
-  font-size: 12px;
+  display: inline-flex;
+  color: var(--term-accent);
+}
+
+.dock-item.closed .dock-icon {
+  color: var(--term-fg-dim);
 }
 
 .dock-title {
-  max-width: 100px;
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .dock-close {
-  width: 16px;
-  height: 16px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 2px;
-  font-size: 10px;
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
   opacity: 0;
-  transition: all 0.15s;
-  margin-left: 4px;
+  transition: all var(--term-dur-fast);
+  margin-left: 2px;
 }
 
 .dock-item:hover .dock-close {
@@ -617,5 +1242,21 @@ onBeforeUnmount(() => {
 .dock-close:hover {
   background: var(--term-danger);
   color: #fff;
+}
+
+/* 窄屏收敛 */
+@media (max-width: 900px) {
+  .quick-jump {
+    width: 150px;
+  }
+
+  .quick-jump.is-open {
+    width: 180px;
+  }
+
+  .toolbar-clock,
+  .status-chip.is-quiet {
+    display: none;
+  }
 }
 </style>

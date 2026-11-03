@@ -1,6 +1,6 @@
 // useDrawingTools.ts
 import { ref, type Ref } from 'vue'
-import type { IChartApi, ISeriesApi } from 'lightweight-charts'
+import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import { saveDrawing, loadDrawing } from '@/api/kline'
 
 export type DrawingType =
@@ -9,9 +9,8 @@ export type DrawingType =
   | 'arrow' | 'text' | 'ray' | 'channel' | 'triangle' | 'vertical'
 
 export interface DrawingPoint {
-  x: number; y: number
-  time?: number | string
-  price?: number
+  time: Time
+  price: number
 }
 
 export interface DrawingObject {
@@ -36,7 +35,7 @@ const TOOL_POINTS: Record<DrawingType, number> = {
 export function useDrawingTools(
   chart: Ref<IChartApi | null>,
   drawingCanvas: Ref<HTMLCanvasElement | null>,
-  candleSeries: Ref<ISeriesApi<any> | null>
+  candleSeries: Ref<ISeriesApi<'Candlestick'> | null>
 ) {
   const drawings = ref<DrawingObject[]>([])
   const currentTool = ref<DrawingType | null>(null)
@@ -53,11 +52,11 @@ export function useDrawingTools(
   const canvasCtx = ref<CanvasRenderingContext2D | null>(null)
 
   // --- 坐标转换：time/price → 屏幕 x/y ---
-  const toScreen = (time: number | string | undefined, price: number | undefined): { x: number; y: number } => {
+  const toScreen = (time: Time, price: number): { x: number; y: number } => {
     const c = chart.value
     const s = candleSeries.value
     if (!c || !s) return { x: -9999, y: -9999 } // 返回不可见坐标
-    const x = time != null ? c.timeScale().timeToCoordinate(time as any) ?? -9999 : -9999
+    const x = time != null ? c.timeScale().timeToCoordinate(time) ?? -9999 : -9999
     const y = price != null ? s.priceToCoordinate(price) ?? -9999 : -9999
     return { x, y }
   }
@@ -204,12 +203,13 @@ export function useDrawingTools(
     const timeScale = chart.value.timeScale()
     const time = timeScale.coordinateToTime(x)
     const price = candleSeries.value?.coordinateToPrice(y)
-    if (time != null) drawing.points[pointIndex].time = time as string
-    if (price != null) drawing.points[pointIndex].price = price
+    if (time == null || price == null || !Number.isFinite(price)) return
+    drawing.points[pointIndex] = { time, price }
     redraw()
   }
 
   const endDrag = () => {
+    if (!isDragging.value) return
     dragTarget.value = null
     isDragging.value = false
     autoSaveDrawings() // 拖拽修改后自动保存
@@ -241,17 +241,10 @@ export function useDrawingTools(
 
   const startDraw = (tool: DrawingType) => {
     // 点击已选中的工具时，退出该模式（回到默认状态）
-    if (currentTool.value === tool) {
-      currentTool.value = null
-      currentPoints.value = []
-      isDrawing.value = false
-      mousePosition.value = null
-      redraw()
-      return
-    }
-    currentTool.value = tool
-    currentPoints.value = []
-    isDrawing.value = tool !== 'select' // 选择模式不进入画线状态
+    const nextTool = currentTool.value === tool ? null : tool
+    cancelDraw()
+    currentTool.value = nextTool
+    isDrawing.value = nextTool !== null && nextTool !== 'select'
   }
 
   const cancelDraw = () => {
@@ -259,6 +252,8 @@ export function useDrawingTools(
     currentPoints.value = []
     isDrawing.value = false
     mousePosition.value = null
+    endDrag()
+    redraw()
   }
 
   const updateMousePosition = (x: number, y: number) => {
@@ -276,10 +271,14 @@ export function useDrawingTools(
     const timeScale = chart.value.timeScale()
     const time = timeScale.coordinateToTime(x)
     const price = candleSeries.value?.coordinateToPrice(y)
-    currentPoints.value.push({ time: time ?? undefined, price: price ?? undefined })
+    if (time == null || price == null || !Number.isFinite(price)) return
+    currentPoints.value.push({ time, price })
+    mousePosition.value = { x, y }
 
     if (currentPoints.value.length >= TOOL_POINTS[currentTool.value]) {
       completeDraw()
+    } else {
+      redraw()
     }
   }
 
@@ -345,7 +344,7 @@ export function useDrawingTools(
 
   // --- 绘制预览中的控制点（正在画时）---
   const drawPreviewPoints = (ctx: CanvasRenderingContext2D) => {
-    const pts = currentPoints.value.map(p => ({ x: p.x, y: p.y }))
+    const pts = currentPoints.value.map(p => toScreen(p.time, p.price))
     if (pts.length > 0) {
       drawControlPoints(ctx, pts)
     }
@@ -356,7 +355,8 @@ export function useDrawingTools(
     if (!currentTool.value || currentPoints.value.length === 0 || !mousePosition.value) return
 
     const tool = currentTool.value
-    const pts = currentPoints.value.map(p => ({ x: p.x, y: p.y }))
+    // 将 time/price 转换为屏幕坐标
+    const pts = currentPoints.value.map(p => toScreen(p.time, p.price))
     const mouse = mousePosition.value
 
     ctx.save()
@@ -603,6 +603,7 @@ export function useDrawingTools(
   let unsubscribeVisibleRange: (() => void) | null = null
 
   const subscribeChartMove = () => {
+    unsubscribeChartMove()
     if (!chart.value) return
     const timeScale = chart.value.timeScale()
     const onChartChange = () => redraw()
@@ -613,6 +614,14 @@ export function useDrawingTools(
   const unsubscribeChartMove = () => {
     unsubscribeVisibleRange?.()
     unsubscribeVisibleRange = null
+  }
+
+  const disposeDrawingTools = () => {
+    unsubscribeChartMove()
+    ++loadVersion.value
+    if (rafId !== null) cancelAnimationFrame(rafId)
+    rafId = null
+    canvasCtx.value = null
   }
 
   // --- 持久化 ---
@@ -666,6 +675,8 @@ export function useDrawingTools(
   }
 
   const loadDrawings = async (stockCode: string, period: string) => {
+    // 成功和失败路径都必须受版本保护，包括切换前等待保存的阶段。
+    const version = ++loadVersion.value
     try {
       const userId = Number(localStorage.getItem('userId') || '0')
       const prevKey = saveKey.value
@@ -673,6 +684,7 @@ export function useDrawingTools(
       if (prevKey && prevKey.stockCode !== stockCode && drawings.value.length > 0) {
         await saveDrawings(prevKey.stockCode, prevKey.period)
       }
+      if (version !== loadVersion.value) return
       // 立即清空画布上的旧数据（防止残留）
       drawings.value = []
       selectedId.value = null
@@ -685,8 +697,6 @@ export function useDrawingTools(
         redraw()
         return
       }
-      // 版本号递增，使之前未完成的加载失效
-      const version = ++loadVersion.value
       const res = await loadDrawing(userId, stockCode, period)
       // 版本已变化，说明已切换到其他股票，放弃本次结果
       if (version !== loadVersion.value) return
@@ -700,6 +710,7 @@ export function useDrawingTools(
         redraw()
       }
     } catch (e) {
+      if (version !== loadVersion.value) return
       console.error('[useDrawingTools] 加载画线失败:', e)
       // 出错时尝试从 localStorage 加载
       drawings.value = loadDrawingsLocal(stockCode, period)
@@ -732,6 +743,7 @@ export function useDrawingTools(
     currentTool,
     isDrawing,
     selectedId,
+    isDragging,
     initCanvas,
     startDraw,
     cancelDraw,
@@ -747,6 +759,7 @@ export function useDrawingTools(
     loadDrawings,
     redraw,
     subscribeChartMove,
-    unsubscribeChartMove
+    unsubscribeChartMove,
+    disposeDrawingTools
   }
 }

@@ -1,17 +1,4 @@
 -- H2 测试表结构(对齐 trade_db)
-CREATE TABLE IF NOT EXISTS stock_info (
-    stock_code VARCHAR(32) NOT NULL,
-    stock_name VARCHAR(64),
-    area VARCHAR(64),
-    industry VARCHAR(64),
-    market VARCHAR(16),
-    list_date VARCHAR(32),
-    status TINYINT DEFAULT 1,
-    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (stock_code)
-);
-
 CREATE TABLE IF NOT EXISTS trade_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -29,9 +16,11 @@ CREATE TABLE IF NOT EXISTS trade_record (
     trade_date DATE NOT NULL,
     trade_time TIMESTAMP DEFAULT NULL,
     remark VARCHAR(512) DEFAULT NULL,
+    request_id VARCHAR(64) DEFAULT NULL,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    deleted TINYINT NOT NULL DEFAULT 0
+    deleted TINYINT NOT NULL DEFAULT 0,
+    CONSTRAINT uk_user_request UNIQUE (user_id, request_id)
 );
 
 CREATE TABLE IF NOT EXISTS position_summary (
@@ -49,24 +38,6 @@ CREATE TABLE IF NOT EXISTS position_summary (
     CONSTRAINT uk_user_stock UNIQUE (user_id, stock_code)
 );
 
-CREATE TABLE IF NOT EXISTS stock_daily_data (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    stock_code VARCHAR(32) NOT NULL,
-    trade_date VARCHAR(8) NOT NULL,
-    open_price DECIMAL(12,4),
-    high_price DECIMAL(12,4),
-    low_price DECIMAL(12,4),
-    close_price DECIMAL(12,4),
-    pre_close DECIMAL(12,4),
-    change_amount DECIMAL(12,4),
-    pct_chg DECIMAL(12,4),
-    vol DECIMAL(20,4),
-    amount DECIMAL(20,4),
-    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (stock_code, trade_date)
-);
-
 CREATE TABLE IF NOT EXISTS local_message (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     msg_id VARCHAR(64) NOT NULL,
@@ -81,3 +52,57 @@ CREATE TABLE IF NOT EXISTS local_message (
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (msg_id)
 );
+
+-- Same columns as sql/practice.sql; snapshot is inserted once and never updated.
+CREATE TABLE IF NOT EXISTS practice_session (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    stock_code VARCHAR(20),
+    start_date VARCHAR(10),
+    end_date VARCHAR(10),
+    current_day VARCHAR(10),
+    status VARCHAR(20),
+    equity DECIMAL(18,2),
+    initial_cash DECIMAL(18,2),
+    version BIGINT NOT NULL DEFAULT 0,
+    state_json LONGTEXT NOT NULL,
+    snapshot_json LONGTEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_practice_owner_created ON practice_session (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS trade_journal (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(128) NOT NULL,
+    stock_code VARCHAR(32) DEFAULT NULL,
+    stock_name VARCHAR(64) DEFAULT NULL,
+    journal_date DATE NOT NULL,
+    emotion_score TINYINT NOT NULL DEFAULT 3,
+    market_sentiment VARCHAR(32) DEFAULT NULL,
+    strategy_type VARCHAR(64) DEFAULT NULL,
+    content TEXT NOT NULL,
+    reflection TEXT DEFAULT NULL,
+    tags VARCHAR(256) DEFAULT NULL,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS price_alert (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    stock_code VARCHAR(32) NOT NULL,
+    stock_name VARCHAR(64) NOT NULL,
+    alert_type TINYINT NOT NULL,
+    target_value DECIMAL(12, 4) NOT NULL,
+    notes VARCHAR(256) DEFAULT NULL,
+    status TINYINT NOT NULL DEFAULT 0,
+    triggered_time TIMESTAMP DEFAULT NULL,
+    triggered_value DECIMAL(12, 4) DEFAULT NULL,
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted TINYINT NOT NULL DEFAULT 0
+);
+

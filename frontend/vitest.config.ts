@@ -11,6 +11,6 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'node'
+    environment: './tests/renderer-environment.ts'
   }
 })

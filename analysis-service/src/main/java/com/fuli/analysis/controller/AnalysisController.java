@@ -31,11 +31,7 @@ public class AnalysisController {
     }
 
     private Long getCurrentUserId() {
-        String userIdHeader = request.getHeader("X-User-Id");
-        if (userIdHeader != null && !userIdHeader.isEmpty()) {
-            return Long.parseLong(userIdHeader);
-        }
-        return null;
+        return com.fuli.common.api.security.AuthenticatedUser.requireId(request);
     }
 
     @GetMapping("/statistics")
@@ -70,6 +66,14 @@ public class AnalysisController {
         if (result == null) {
             return Result.error("查询资金余额失败，请稍后重试");
         }
+        return Result.success(result);
+    }
+
+    @GetMapping("/performance")
+    public Result<com.fuli.analysis.vo.PerformanceStatsVO> performance(@RequestParam(required = false) LocalDate startDate,
+                                                                       @RequestParam(required = false) LocalDate endDate) {
+        Long userId = getCurrentUserId();
+        com.fuli.analysis.vo.PerformanceStatsVO result = analysisService.getPerformanceStats(userId, startDate, endDate);
         return Result.success(result);
     }
 }

@@ -44,7 +44,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<?> handleException(Exception e) {
+        // 完整堆栈只进日志，对外返回固定文案，避免泄露 SQL/类名/内部路径等信息。
         log.error("System exception: ", e);
-        return Result.error("系统异常: " + e.getMessage());
+        return Result.error(500, "系统繁忙，请稍后重试");
     }
 }

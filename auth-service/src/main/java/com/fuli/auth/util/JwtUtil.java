@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * JWT 工具类（auth-service 端）。
@@ -47,6 +48,7 @@ public class JwtUtil {
                 .subject(username)
                 .issuedAt(now)
                 .expiration(expiryDate)
+                .id(UUID.randomUUID().toString())
                 .signWith(getSigningKey())
                 .compact();
     }
@@ -75,5 +77,10 @@ public class JwtUtil {
 
     public Long getUserIdFromToken(String token) {
         return parseToken(token).get("userId", Long.class);
+    }
+
+    /** 过期时间（秒），供登录响应返回，与签发逻辑保持单一事实来源。 */
+    public long getExpirationSeconds() {
+        return jwtProperties.getExpiration() / 1000;
     }
 }

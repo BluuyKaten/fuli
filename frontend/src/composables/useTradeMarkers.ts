@@ -1,33 +1,36 @@
 // useTradeMarkers.ts
-import { ref, type Ref } from 'vue'
-import type { IChartApi, ISeriesApi } from 'lightweight-charts'
-import type { SeriesMarker } from 'lightweight-charts'
+import { ref, watch, type Ref } from 'vue'
+import { createSeriesMarkers, type ISeriesApi, type ISeriesMarkersPluginApi, type SeriesMarker, type Time } from 'lightweight-charts'
 import { getTradeList } from '@/api/trade'
 
 export interface TradeMarker {
   id: string
   source: 'manual' | 'auto'
   direction: 'buy' | 'sell'
-  time: string
+  time: Time
   price: number
   quantity?: number
   editable: boolean
 }
 
-export function useTradeMarkers(
-  chart: Ref<IChartApi | null>,
-  candleSeries: Ref<ISeriesApi<any> | null>
-) {
+export function useTradeMarkers(candleSeries: Ref<ISeriesApi<'Candlestick'> | null>) {
   const markers = ref<TradeMarker[]>([])
+  let plugin: ISeriesMarkersPluginApi<Time> | null = null
+  let attachedSeries: ISeriesApi<'Candlestick'> | null = null
+  let disposed = false
+  let loadVersion = 0
 
-  const BUY_COLOR = '#26a69a'
-  const SELL_COLOR = '#ef5350'
+  const timeValue = (time: Time): number => {
+    if (typeof time === 'number') return time
+    if (typeof time === 'string') return Date.parse(time) / 1000
+    return Date.UTC(time.year, time.month - 1, time.day) / 1000
+  }
 
-  const toSeriesMarkers = (): SeriesMarker[] => {
-    return markers.value.map(m => ({
-      time: m.time as any,
+  const toSeriesMarkers = (): SeriesMarker<Time>[] => {
+    return [...markers.value].sort((a, b) => timeValue(a.time) - timeValue(b.time)).map(m => ({
+      time: m.time,
       position: m.direction === 'buy' ? 'belowBar' : 'aboveBar',
-      color: m.direction === 'buy' ? BUY_COLOR : SELL_COLOR,
+      color: m.direction === 'buy' ? '#26a69a' : '#ef5350',
       shape: m.direction === 'buy' ? 'arrowUp' : 'arrowDown',
       text: m.direction === 'buy' ? '买' : '卖',
       id: m.id
@@ -35,18 +38,24 @@ export function useTradeMarkers(
   }
 
   const applyMarkers = () => {
-    if (!candleSeries.value) return
-    candleSeries.value.setMarkers(toSeriesMarkers())
+    if (disposed) return
+    const series = candleSeries.value
+    if (series !== attachedSeries) {
+      plugin?.detach()
+      plugin = null
+      attachedSeries = series
+    }
+    if (!series) return
+    if (!plugin) plugin = createSeriesMarkers(series, [])
+    plugin.setMarkers(toSeriesMarkers())
   }
 
-  const addManualMarker = (direction: 'buy' | 'sell', time: string, price: number) => {
+  const stopWatching = watch(candleSeries, applyMarkers, { flush: 'sync' })
+
+  const addManualMarker = (direction: 'buy' | 'sell', time: Time, price: number) => {
     const marker: TradeMarker = {
       id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      source: 'manual',
-      direction,
-      time,
-      price,
-      editable: true
+      source: 'manual', direction, time, price, editable: true
     }
     markers.value.push(marker)
     applyMarkers()
@@ -54,23 +63,23 @@ export function useTradeMarkers(
   }
 
   const loadAutoMarkers = async (stockCode: string) => {
+    const version = ++loadVersion
+    markers.value = markers.value.filter(m => m.source === 'manual')
+    applyMarkers()
     try {
       const userId = Number(localStorage.getItem('userId') || '0')
       if (userId <= 0 || !stockCode) return
       const res = await getTradeList({ userId, stockCode, pageNum: 1, pageSize: 200 })
-      if (res.code !== 200 || !res.data) return
-
+      if (disposed || version !== loadVersion || res.code !== 200 || !res.data) return
       const autoMarkers: TradeMarker[] = res.data.map(t => ({
         id: `auto-${t.id}`,
         source: 'auto',
         direction: t.tradeType === 1 ? 'buy' : 'sell',
-        time: t.tradeDate,
+        time: t.tradeDate.slice(0, 10),
         price: t.tradePrice,
         quantity: t.tradeQuantity,
         editable: false
       }))
-
-      // 移除旧的 auto 标记，保留 manual 标记
       markers.value = markers.value.filter(m => m.source === 'manual').concat(autoMarkers)
       applyMarkers()
     } catch (e) {
@@ -88,12 +97,14 @@ export function useTradeMarkers(
     applyMarkers()
   }
 
-  return {
-    markers,
-    addManualMarker,
-    loadAutoMarkers,
-    removeMarker,
-    clearMarkers,
-    applyMarkers
+  const disposeMarkers = () => {
+    disposed = true
+    ++loadVersion
+    stopWatching()
+    plugin?.detach()
+    plugin = null
+    attachedSeries = null
   }
+
+  return { markers, addManualMarker, loadAutoMarkers, removeMarker, clearMarkers, applyMarkers, disposeMarkers }
 }

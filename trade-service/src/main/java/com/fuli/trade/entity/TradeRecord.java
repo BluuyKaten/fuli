@@ -24,6 +24,11 @@ public class TradeRecord implements Serializable {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /**
+     * 客户端幂等键，与 user_id 组成唯一索引 uk_user_request，用于重复提交去重。
+     */
+    private String requestId;
+
     private Long userId;
 
     private String stockCode;

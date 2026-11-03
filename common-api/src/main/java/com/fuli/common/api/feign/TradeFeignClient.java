@@ -3,6 +3,7 @@ package com.fuli.common.api.feign;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
 import org.springframework.cloud.openfeign.FeignClient;
@@ -28,11 +29,17 @@ public interface TradeFeignClient {
     @GetMapping("/trade/user/{userId}")
     Result<List<TradeVO>> getTradesByUserId(@PathVariable("userId") Long userId);
 
-    @PostMapping("/trade/statistics")
+    @PostMapping("/trade/internal/statistics")
     Result<StatisticsVO> getStatistics(@RequestBody TradeQueryDTO queryDTO);
 
-    @PostMapping("/trade/queryByCondition")
+    @PostMapping("/trade/internal/queryByCondition")
     Result<List<TradeVO>> queryByCondition(@RequestBody TradeQueryDTO queryDTO);
+
+    /**
+     * 查询用户所有持仓（复用 position_summary 加权平均成本口径 + T+1 可卖数量）。
+     */
+    @GetMapping("/trade/internal/positions")
+    Result<List<PositionVO>> getPositions(@RequestParam("userId") Long userId);
 
     @DeleteMapping("/trade/internal/clearAll")
     Result<Boolean> clearAll(@RequestParam("userId") Long userId);

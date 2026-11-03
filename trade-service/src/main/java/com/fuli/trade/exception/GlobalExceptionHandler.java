@@ -26,6 +26,13 @@ public class GlobalExceptionHandler {
         return Result.error(400, message);
     }
 
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public org.springframework.http.ResponseEntity<Result<?>> handleResponseStatusException(
+            org.springframework.web.server.ResponseStatusException e) {
+        return org.springframework.http.ResponseEntity.status(e.getStatusCode())
+                .body(Result.error(e.getStatusCode().value(), e.getReason()));
+    }
+
     @ExceptionHandler(Exception.class)
     public Result<?> handleException(Exception e) {
         log.error("System exception: ", e);

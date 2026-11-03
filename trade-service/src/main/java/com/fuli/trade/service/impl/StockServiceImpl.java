@@ -34,26 +34,68 @@ public class StockServiceImpl implements StockService {
 
     @Override
     public List<Map<String, Object>> searchStocks(String keyword) {
-        List<Map<String, Object>> result = dataFeignClient.searchStocks(keyword);
-        return result != null ? result : new java.util.ArrayList<>();
+        try {
+            List<Map<String, Object>> result = dataFeignClient.searchStocks(keyword);
+            return result != null ? result : new java.util.ArrayList<>();
+        } catch (Exception e) {
+            log.warn("搜索股票失败，降级返回空: keyword={}, error={}", keyword, e.getMessage());
+            return new java.util.ArrayList<>();
+        }
     }
 
     @Override
     public List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate) {
-        List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode, startDate, endDate);
-        return result != null ? result : new java.util.ArrayList<>();
+        try {
+            List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode, startDate, endDate);
+            return result != null ? result : new java.util.ArrayList<>();
+        } catch (Exception e) {
+            log.warn("获取日线失败，降级返回空: stockCode={}, error={}", stockCode, e.getMessage());
+            return new java.util.ArrayList<>();
+        }
     }
 
     @Override
     public Map<String, Object> getStockInfo(String stockCode) {
-        Map<String, Object> result = dataFeignClient.getStockInfo(stockCode);
-        return result != null ? result : new HashMap<>();
+        try {
+            Map<String, Object> result = dataFeignClient.getStockInfo(stockCode);
+            return result != null ? result : new HashMap<>();
+        } catch (Exception e) {
+            log.warn("获取股票信息失败，降级返回空: stockCode={}, error={}", stockCode, e.getMessage());
+            return new HashMap<>();
+        }
     }
 
     @Override
     public Map<String, Object> getLatestPrice(String stockCode) {
-        Map<String, Object> result = dataFeignClient.getLatestPrice(stockCode);
-        return result != null ? result : new HashMap<>();
+        try {
+            Map<String, Object> result = dataFeignClient.getLatestPrice(stockCode);
+            return result != null ? result : new HashMap<>();
+        } catch (Exception e) {
+            log.warn("获取最新价失败，降级返回空: stockCode={}, error={}", stockCode, e.getMessage());
+            return new HashMap<>();
+        }
+    }
+
+    @Override
+    public Map<String, Map<String, Object>> getLatestPrices(String stockCodes) {
+        try {
+            Map<String, Map<String, Object>> result = dataFeignClient.getLatestPrices(stockCodes);
+            return result != null ? result : new HashMap<>();
+        } catch (Exception e) {
+            log.warn("批量获取最新价失败，降级返回空: stockCodes={}, error={}", stockCodes, e.getMessage());
+            return new HashMap<>();
+        }
+    }
+
+    @Override
+    public Map<String, Map<String, Object>> getStockInfos(String stockCodes) {
+        try {
+            Map<String, Map<String, Object>> result = dataFeignClient.getStockInfos(stockCodes);
+            return result != null ? result : new HashMap<>();
+        } catch (Exception e) {
+            log.warn("批量获取股票信息失败，降级返回空: stockCodes={}, error={}", stockCodes, e.getMessage());
+            return new HashMap<>();
+        }
     }
 
     @Override
@@ -124,11 +166,12 @@ public class StockServiceImpl implements StockService {
      * - 北京：8xxxxx.BJ、43xxxx.BJ
      */
     private boolean isAStock(String market, String stockCode) {
-        if (market == null || market.isEmpty()) {
-            // 兜底：通过代码后缀判断
-            return stockCode != null && (stockCode.endsWith(".SH") || stockCode.endsWith(".SZ") || stockCode.endsWith(".BJ"));
+        if (market != null && !market.isEmpty()) {
+            return "SH".equalsIgnoreCase(market) || "SZ".equalsIgnoreCase(market) || "BJ".equalsIgnoreCase(market);
         }
-        return "SH".equalsIgnoreCase(market) || "SZ".equalsIgnoreCase(market) || "BJ".equalsIgnoreCase(market);
+        // 兜底：6 位数字代码（可带 .SH/.SZ/.BJ 后缀）视为 A 股。
+        // 本项目仅支持 A 股日线，未知代码按 T+1 处理，避免前端展示出可当日卖出的错误数量。
+        return stockCode == null || stockCode.matches("\\d{6}(\\.(?i)(SH|SZ|BJ))?");
     }
 
     /**

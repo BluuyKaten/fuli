@@ -1,3 +1,11 @@
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+
 # 本地开发 Profile（data-service）
 # 使用方式：spring.profiles.active=local
 #
@@ -11,3 +19,8 @@ jwt:
 fuli:
   # 本地开发用随机密钥（>= 16 字节），请勿用于生产。
   internal-key: dev-only-internal-key-0123456789
+
+# 本地开发保留 SQL 日志；生产环境使用默认 slf4j 实现（不打印 SQL）。
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

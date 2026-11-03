@@ -16,9 +16,11 @@ import java.util.Map;
 public class StockController {
 
     private final StockService stockService;
+    private final jakarta.servlet.http.HttpServletRequest request;
 
-    public StockController(StockService stockService) {
+    public StockController(StockService stockService, jakarta.servlet.http.HttpServletRequest request) {
         this.stockService = stockService;
+        this.request = request;
     }
 
     @GetMapping("/search")
@@ -56,44 +58,27 @@ public class StockController {
     }
 
     /**
-     * 批量获取股票最新行情（消除 N+1 查询）
+     * 批量获取股票最新行情（一次 Feign 批量调用，消除 N+1 查询）
      */
     @GetMapping("/latest-prices")
     public Result<Map<String, Map<String, Object>>> latestPrices(@RequestParam String stockCodes) {
-        Map<String, Map<String, Object>> result = new HashMap<>();
-        for (String code : stockCodes.split(",")) {
-            String trimmed = code.trim();
-            if (trimmed.isEmpty()) continue;
-            Map<String, Object> latest = stockService.getLatestPrice(trimmed);
-            if (latest != null && !latest.isEmpty()) {
-                result.put(trimmed, latest);
-            }
-        }
-        return Result.success(result);
+        return Result.success(stockService.getLatestPrices(stockCodes));
     }
 
     /**
-     * 批量获取股票基础信息（消除 N+1 查询）
+     * 批量获取股票基础信息（一次 Feign 批量调用，消除 N+1 查询）
      */
     @GetMapping("/infos")
     public Result<Map<String, Map<String, Object>>> infos(@RequestParam String stockCodes) {
-        Map<String, Map<String, Object>> result = new HashMap<>();
-        for (String code : stockCodes.split(",")) {
-            String trimmed = code.trim();
-            if (trimmed.isEmpty()) continue;
-            Map<String, Object> stockInfo = stockService.getStockInfo(trimmed);
-            if (stockInfo != null && !stockInfo.isEmpty()) {
-                result.put(trimmed, stockInfo);
-            }
-        }
-        return Result.success(result);
+        return Result.success(stockService.getStockInfos(stockCodes));
     }
 
     /**
      * 查询当前用户对某只股票的持仓数量（供 K 线图卖出时显示）
      */
     @GetMapping("/holding")
-    public Result<Map<String, Object>> getHolding(@RequestParam Long userId, @RequestParam String stockCode) {
+    public Result<Map<String, Object>> getHolding(@RequestParam(required = false) Long userId, @RequestParam String stockCode) {
+        userId = com.fuli.common.api.security.AuthenticatedUser.requireId(request);
         Map<String, Object> map = new HashMap<>();
         int quantity = stockService.getHoldingQuantity(userId, stockCode);
         map.put("userId", userId);
@@ -107,7 +92,8 @@ public class StockController {
      * 返回：总持仓、可卖数量、冻结数量、市场类型、交易规则
      */
     @GetMapping("/available-quantity")
-    public Result<Map<String, Object>> getAvailableQuantity(@RequestParam Long userId, @RequestParam String stockCode) {
+    public Result<Map<String, Object>> getAvailableQuantity(@RequestParam(required = false) Long userId, @RequestParam String stockCode) {
+        userId = com.fuli.common.api.security.AuthenticatedUser.requireId(request);
         Map<String, Object> map = stockService.getAvailableQuantity(userId, stockCode);
         return Result.success(map);
     }
@@ -117,7 +103,8 @@ public class StockController {
      * 用于修复历史数据不一致的问题
      */
     @GetMapping("/fix-holding")
-    public Result<Map<String, Object>> fixHolding(@RequestParam Long userId) {
+    public Result<Map<String, Object>> fixHolding(@RequestParam(required = false) Long userId) {
+        userId = com.fuli.common.api.security.AuthenticatedUser.requireId(request);
         Map<String, Object> result = stockService.fixHoldingData(userId);
         return Result.success(result);
     }

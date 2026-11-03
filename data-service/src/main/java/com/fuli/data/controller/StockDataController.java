@@ -4,6 +4,7 @@ import com.fuli.data.entity.StockDailyData;
 import com.fuli.data.entity.StockInfo;
 import com.fuli.data.mapper.StockDailyDataMapper;
 import com.fuli.data.mapper.StockInfoMapper;
+import com.fuli.common.api.util.StockCodeUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
@@ -12,9 +13,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 行情数据控制器（data-service 对外 Feign 接口）。
@@ -52,11 +57,25 @@ public class StockDataController {
 
     /**
      * 获取股票日线行情。
+     *
+     * <p>行情库统一使用带市场后缀的代码（600519.SH），调用方若只传 6 位裸代码，
+     * 先用原值查一次以兼容历史数据，未命中再补后缀重查。
      */
     @GetMapping("/daily")
     public List<Map<String, Object>> getDailyData(@RequestParam("stockCode") String stockCode,
                                                   @RequestParam(value = "startDate", required = false) String startDate,
                                                   @RequestParam(value = "endDate", required = false) String endDate) {
+        List<StockDailyData> dataList = queryDaily(stockCode, startDate, endDate);
+        if (dataList.isEmpty()) {
+            String suffixed = withSuffixIfBare(stockCode);
+            if (!suffixed.equals(stockCode)) {
+                dataList = queryDaily(suffixed, startDate, endDate);
+            }
+        }
+        return dataList.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
+    }
+
+    private List<StockDailyData> queryDaily(String stockCode, String startDate, String endDate) {
         LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockDailyData::getStockCode, stockCode);
         if (startDate != null && !startDate.isEmpty()) {
@@ -66,8 +85,7 @@ public class StockDataController {
             wrapper.le(StockDailyData::getTradeDate, endDate);
         }
         wrapper.orderByAsc(StockDailyData::getTradeDate);
-        List<StockDailyData> dataList = stockDailyDataMapper.selectList(wrapper);
-        return dataList.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
+        return stockDailyDataMapper.selectList(wrapper);
     }
 
     /**
@@ -76,6 +94,12 @@ public class StockDataController {
     @GetMapping("/info")
     public Map<String, Object> getStockInfo(@RequestParam("stockCode") String stockCode) {
         StockInfo info = stockInfoMapper.selectById(stockCode);
+        if (info == null) {
+            String suffixed = withSuffixIfBare(stockCode);
+            if (!suffixed.equals(stockCode)) {
+                info = stockInfoMapper.selectById(suffixed);
+            }
+        }
         return info != null ? toMap(info) : new HashMap<>();
     }
 
@@ -84,11 +108,13 @@ public class StockDataController {
      */
     @GetMapping("/latest-price")
     public Map<String, Object> getLatestPrice(@RequestParam("stockCode") String stockCode) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, stockCode)
-                .orderByDesc(StockDailyData::getTradeDate)
-                .last("LIMIT 1");
-        StockDailyData latest = stockDailyDataMapper.selectOne(wrapper);
+        StockDailyData latest = queryLatest(stockCode);
+        if (latest == null) {
+            String suffixed = withSuffixIfBare(stockCode);
+            if (!suffixed.equals(stockCode)) {
+                latest = queryLatest(suffixed);
+            }
+        }
 
         Map<String, Object> result = new HashMap<>();
         if (latest != null) {
@@ -100,33 +126,112 @@ public class StockDataController {
         return result;
     }
 
+    private StockDailyData queryLatest(String stockCode) {
+        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StockDailyData::getStockCode, stockCode)
+                .orderByDesc(StockDailyData::getTradeDate)
+                .last("LIMIT 1");
+        return stockDailyDataMapper.selectOne(wrapper);
+    }
+
     /**
      * 批量获取股票最新行情，消除 N+1 查询。
+     * 一次 IN 查询所有代码的日线（按日期倒序），内存中每只代码取最新一条。
      */
     @GetMapping("/latest-prices")
     public Map<String, Map<String, Object>> getLatestPrices(@RequestParam("stockCodes") String stockCodes) {
-        String[] codes = stockCodes.split(",");
+        List<String> rawCodes = normalizeCodeList(stockCodes);
         Map<String, Map<String, Object>> result = new HashMap<>();
-        for (String code : codes) {
-            result.put(code.trim(), getLatestPrice(code.trim()));
+        if (rawCodes.isEmpty()) {
+            return result;
+        }
+
+        // 查询集合 = 原值 ∪ 归一化后缀值，一次 IN 查询
+        Map<String, String> queryToRaw = new HashMap<>();
+        Set<String> queryCodes = new LinkedHashSet<>();
+        for (String raw : rawCodes) {
+            queryCodes.add(raw);
+            String suffixed = StockCodeUtil.withSuffix(raw);
+            queryCodes.add(suffixed);
+            queryToRaw.putIfAbsent(suffixed, raw);
+        }
+
+        List<StockDailyData> rows = stockDailyDataMapper.selectList(
+                new LambdaQueryWrapper<StockDailyData>()
+                        .in(StockDailyData::getStockCode, queryCodes)
+                        .orderByDesc(StockDailyData::getTradeDate));
+        Set<String> matched = new HashSet<>();
+        for (StockDailyData row : rows) {
+            String raw = queryToRaw.getOrDefault(row.getStockCode(), row.getStockCode());
+            if (!matched.add(raw)) {
+                continue; // 已按日期倒序，每只代码第一条即最新
+            }
+            result.put(raw, toLatestMap(row));
         }
         return result;
     }
 
     /**
-     * 批量获取股票基础信息，消除 N+1 查询。
+     * 批量获取股票基础信息，消除 N+1 查询（一次 IN 查询）。
      */
     @GetMapping("/infos")
     public Map<String, Map<String, Object>> getStockInfos(@RequestParam("stockCodes") String stockCodes) {
-        String[] codes = stockCodes.split(",");
+        List<String> rawCodes = normalizeCodeList(stockCodes);
         Map<String, Map<String, Object>> result = new HashMap<>();
-        for (String code : codes) {
-            StockInfo info = stockInfoMapper.selectById(code.trim());
-            if (info != null) {
-                result.put(code.trim(), toMap(info));
+        if (rawCodes.isEmpty()) {
+            return result;
+        }
+
+        Map<String, String> queryToRaw = new HashMap<>();
+        Set<String> queryCodes = new LinkedHashSet<>();
+        for (String raw : rawCodes) {
+            queryCodes.add(raw);
+            String suffixed = StockCodeUtil.withSuffix(raw);
+            queryCodes.add(suffixed);
+            queryToRaw.putIfAbsent(suffixed, raw);
+        }
+
+        List<StockInfo> infos = stockInfoMapper.selectBatchIds(queryCodes);
+        Set<String> matched = new HashSet<>();
+        for (StockInfo info : infos) {
+            String raw = queryToRaw.getOrDefault(info.getStockCode(), info.getStockCode());
+            if (!matched.add(raw)) {
+                continue;
+            }
+            result.put(raw, toMap(info));
+        }
+        return result;
+    }
+
+    /** 解析逗号分隔的代码列表并 trim。 */
+    private List<String> normalizeCodeList(String stockCodes) {
+        List<String> result = new ArrayList<>();
+        if (stockCodes == null || stockCodes.isBlank()) {
+            return result;
+        }
+        for (String raw : stockCodes.split(",")) {
+            String code = raw.trim();
+            if (!code.isEmpty()) {
+                result.add(code);
             }
         }
         return result;
+    }
+
+    private Map<String, Object> toLatestMap(StockDailyData latest) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("stockCode", latest.getStockCode());
+        map.put("closePrice", latest.getClosePrice());
+        map.put("preClose", latest.getPreClose());
+        map.put("tradeDate", latest.getTradeDate());
+        return map;
+    }
+
+    /**
+     * 裸 6 位代码补全交易所后缀（统一走 StockCodeUtil，精确到前三位，含北交所 920xxx）。
+     */
+    private static String withSuffixIfBare(String code) {
+        return StockCodeUtil.withSuffix(code);
     }
 
     private Map<String, Object> toMap(StockInfo info) {

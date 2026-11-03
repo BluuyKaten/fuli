@@ -93,4 +93,28 @@ class AuthInternalServiceTest {
         assertEquals(0, afterSecond.compareTo(new BigDecimal("5500.00")),
                 "同一 msgId 重复调用不应重复入账");
     }
+
+    /**
+     * 条件扣款是资金安全的最后一道闸：余额不足必须返回 false 且余额不变，
+     * 否则并发买入可以把余额扣成负数。
+     */
+    @Test
+    void deductCash_insufficientBalance_isRejectedWithoutChangingBalance() {
+        Long userId = USER_ID + 2;
+        User user = new User();
+        user.setId(userId);
+        user.setUsername("testuser3");
+        user.setPassword("pwd");
+        user.setCash(new BigDecimal("100.00"));
+        userService.save(user);
+
+        assertFalse(userService.deductCash(userId, new BigDecimal("100.01")),
+                "余额不足时不应扣款成功");
+        assertEquals(0, new BigDecimal("100.00").compareTo(userService.getById(userId).getCash()),
+                "被拒绝的扣款不得改变余额");
+
+        assertTrue(userService.deductCash(userId, new BigDecimal("100.00")),
+                "余额刚好足够时应扣款成功");
+        assertEquals(0, BigDecimal.ZERO.compareTo(userService.getById(userId).getCash()));
+    }
 }

@@ -1,4 +1,4 @@
-# fuli（复利）
+﻿# fuli（复利）
 
 股票复盘系统 - 帮助投资者系统化复盘、总结经验、提升交易水平。
 
@@ -8,58 +8,300 @@
 - 💰 交易记录与持仓管理
 - 📊 盈亏分析、资产曲线、月度收益
 - 🔄 Tushare 行情数据同步
+- 🎯 历史交易练习：逐根揭晓、独立模拟账户、次日开盘成交与结束复盘
+- 📝 **交易复盘笔记（Trade Journal）**：记录买卖逻辑、情绪打分（1-5）、策略分类、经验反思与月度复盘足迹
+- ⚠️ **风控价格预警（Risk Alerts）**：支持价格止盈、价格止损、涨跌幅超限实时监控与仪表盘警示
+- 🏆 **多维绩效分析（Performance Stats）**：胜率、盈亏比、获利因子、连胜连亏极值、持仓周期分布、收益率区间与个股龙虎榜
+- 🔐 **令牌黑名单**：登出后 JWT 立即失效（Redis）
+- 🔍 **全链路请求追踪**：traceId 贯穿网关与各服务日志
+- 🛡️ **服务熔断与优雅降级**：Resilience4j 熔断 + 超时，下游故障不拖垮调用方
+- ⚡ **分析缓存**：Caffeine 短 TTL 缓存聚合结果
 
 ## 技术栈
 
-- **后端**: Spring Boot 4.1 + Spring Cloud 2025.1 + MyBatis-Plus 3.5
-- **前端**: Vue 3 + Vite + TypeScript + Ant Design Vue + ECharts
+- **后端**: Spring Boot 4.1 + Spring Cloud 2025.1 + MyBatis-Plus 3.5 + Resilience4j
+- **前端**: Vue 3 + Vite + TypeScript + Ant Design Vue + ECharts（manualChunks 拆包）
 - **数据库**: MySQL 8.0+
-- **缓存**: Redis（可选）
+- **缓存**: Redis（令牌黑名单）+ Caffeine（分析缓存）
 
-## 快速开始
+## 启动指南
 
-### 前置条件
+### 需要启动什么
 
-- JDK 21+
-- Maven 3.8+
-- Node.js 18+
-- MySQL 8.0+（必须）
-- Redis（可选）
-- Nacos（可选，不启动不影响本地开发）
+完整使用登录、交易、K 线、数据同步、盈亏分析和历史练习时，按下表启动。`common-api` 是公共依赖，只需编译安装，没有独立进程。
 
-### 启动步骤
+| 服务 | 用途 | 本地直连模式 `local` | Nacos 模式 | 默认端口 |
+| --- | --- | --- | --- | --- |
+| MySQL | 用户、交易、行情和练习数据存储 | 必须 | 必须 | `3306` |
+| Nacos | 服务注册、发现和配置中心 | 无需启动 | 必须先启动 | `8848`、客户端 gRPC `9848` |
+| Redis | 令牌黑名单（登出失效）；查询失败 fail-open | 可选（建议） | 可选 | `6379` |
+| `auth-service` | 登录、注册、用户资料和现金账户 | 必须 | 必须 | `8081` |
+| `data-service` | 股票基础信息、历史行情查询与 Tushare 同步 | 必须 | 必须 | `8084` |
+| `trade-service` | 交易、持仓、K 线、自选股与历史练习 | 必须 | 必须 | `8082` |
+| `analysis-service` | 盈亏统计和资产分析 | 必须 | 必须 | `8083` |
+| `gateway-service` | 前端 API 统一入口 | 必须 | 必须 | `8080` |
+| 前端 `frontend` | 浏览器页面 | 必须 | 必须 | `3000` |
+| AKTools / AKShare | 独立的 Python 行情 HTTP 服务 | 按需启动 | 按需启动 | 本文指定 `8090` |
 
-```bash
-# 1. 初始化数据库（在 MySQL 中执行）
-mysql -u root -p < sql/auth_db.sql
-mysql -u root -p < sql/trade_db.sql
+- **本地直连模式（推荐先跑通）**：MySQL → auth、data → trade → analysis → gateway → 前端。所有后端统一启用 `local`，网关与 Feign 直连本机，不依赖 Nacos。
+- **Nacos 模式**：MySQL、Nacos → auth、data → trade → analysis → gateway → 前端。所有后端不启用 `local`，使用 Nacos 服务发现。
+- **AKTools** 与 Java 服务分开启动。当前仓库的 auth 没有调用 AKTools，行情同步使用 Tushare；需要单独使用 AKShare HTTP 接口时才启动它。
 
-# 2. 构建并安装所有模块
-mvn clean install -DskipTests
+### 1. 准备环境（首次）
 
-# 3. 启动后端（每个服务一个终端，均使用 local profile）
-mvn -pl auth-service spring-boot:run -Dspring-boot.run.profiles=local
-mvn -pl trade-service spring-boot:run -Dspring-boot.run.profiles=local
-mvn -pl analysis-service spring-boot:run -Dspring-boot.run.profiles=local
-mvn -pl data-service spring-boot:run -Dspring-boot.run.profiles=local
-mvn -pl gateway-service spring-boot:run -Dspring-boot.run.profiles=local
+- JDK 17+（推荐 21）、Maven 3.8+。项目编译目标为 Java 17，见 `pom.xml` 的 `java.version`。
+- Node.js 建议使用 22 或 24 LTS（当前 Vitest 4 不支持 Node.js 18）。
+- MySQL 8.0+。
+- 使用 Compose 启动依赖时，需要 Docker Desktop / Docker Engine 和 Docker Compose；已有本机服务可直接使用。
+- 使用 AKTools 时，需要 Python 和 pip；当前机器已用 Python 3.11 验证启动。
 
-# 4. 启动前端
-cd frontend && npm install && npm run dev
+下面命令以 **Windows PowerShell** 为例，未特别注明时均在项目根目录执行；每个后端和前端各开一个终端并保持运行。先检查工具版本：
+
+```powershell
+java -version
+mvn -v
+node -v
+npm -v
 ```
 
-访问 http://localhost:3000
+`mvn -v` 显示的 Java 应为 JDK 17 或更新版本；若与 `java -version` 不一致，检查 `JAVA_HOME` 和 `PATH`。只在使用相应可选工具时再检查 `docker compose version`、`python --version`、`python -m pip --version`。
 
-### 本地开发说明
+### 2. 启动基础设施
 
-- **local profile**：各服务均提供 `application-local.yml`，配置了开发用密钥与 localhost 直连路由，**无需配置环境变量即可启动**。
-- **生产环境**：不激活 local profile，必须通过环境变量注入强密钥：
-  ```bash
-  export JWT_SECRET=$(openssl rand -base64 64)      # >= 32 字节
-  export INTERNAL_KEY=$(openssl rand -base64 24)   # >= 16 字节
-  ```
-  启动时网关会校验密钥强度，弱默认值将导致启动失败。
-- **服务发现**：默认使用 `lb://` 负载均衡（需 Nacos）；local profile 直连 localhost 各端口。
+**MySQL（必须，已有服务与 Compose 二选一）**：已有本机 MySQL 时启动该服务，默认连接 `127.0.0.1:3306`、用户 `root`、密码 `123456`。Windows 可用 `Get-Service *mysql*` 查看实际服务名，并从“服务”管理器启动。没有本机 MySQL 时，在项目根目录执行：
+
+```powershell
+docker compose up -d mysql
+docker compose ps mysql
+```
+
+Compose 首次创建 MySQL 数据卷时自动初始化 `auth_db`、`trade_db`、`data_db`，包含图表和练习表，无需再执行下一节的手工初始化。已有数据卷不会自动补表。
+
+**Nacos（仅 Nacos 模式必须）**：已手动启动的实例可继续使用。使用本机 Nacos 2.x 时，在其安装目录的 `bin` 下打开单独终端：
+
+```powershell
+.\startup.cmd -m standalone
+```
+
+也可使用仓库提供的 Nacos 2.4.0 容器，二选一，避免端口冲突：
+
+```powershell
+docker compose up -d nacos
+docker compose ps nacos
+```
+
+默认服务地址为 `127.0.0.1:8848`，Nacos 2.x 控制台为 http://127.0.0.1:8848/nacos/ 。主端口和客户端 gRPC 端口都必须可访问，控制台能打开不代表 gRPC 正常：
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 8848
+Test-NetConnection 127.0.0.1 -Port 9848
+```
+
+自定义地址可设置 `NACOS_SERVER`；客户端 gRPC 端口通常为主端口加 1000，也需放行。远程 Nacos 若启用了认证，还需按实际服务端配置客户端凭据。
+
+**Redis（可选）**：当前核心流程未调用 Redis，可暂不启动。需要时使用现有 Redis，或启动 Compose 服务：
+
+```powershell
+docker compose up -d redis
+docker compose exec redis redis-cli ping
+```
+
+预期返回 `PONG`，默认地址为 `127.0.0.1:6379`。Compose 仅提供基础设施，不会自动启动 Java 后端、前端或 AKTools。
+
+### 3. 初始化数据库、编译依赖（首次或升级时）
+
+**使用本机空数据库时**，从项目根目录进入 MySQL 客户端：
+
+```powershell
+mysql -u root -p
+```
+
+然后在 `mysql>` 提示符中按顺序执行（不要在 PowerShell 中直接执行 `source`）：
+
+```sql
+source sql/auth_db.sql;
+source sql/trade_db.sql;
+source sql/data_db.sql;
+source sql/migrations/V2__lightweight_charts.sql;
+exit;
+```
+
+这些初始化脚本含 `DROP TABLE`，只用于空库，**日常启动不要重跑**。已有库先备份并核对缺表；只新增历史练习表可执行 `source sql/practice.sql;`，该脚本不会删除原表。
+
+在项目根目录编译并安装所有模块，确保单模块启动能找到最新的 `common-api`：
+
+```powershell
+mvn clean install -DskipTests
+```
+
+第一次启动前端时安装依赖：
+
+```powershell
+Set-Location frontend
+npm ci
+```
+
+依赖未变更时，日常启动无需重新安装。后端公共代码变更后应重新运行 Maven 安装命令，再启动各服务。
+
+### 4A. 启动后端：本地直连模式
+
+在 **五个独立终端** 中分别执行下表命令，工作目录都为项目根目录。建议按表格顺序启动，看到每个服务的 `Started ...Application` 后继续。
+
+| 顺序 | 服务 | 启动命令 | IDE 启动类 |
+| --- | --- | --- | --- |
+| 1 | auth（`8081`） | `mvn -pl auth-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `AuthApplication` |
+| 2 | data（`8084`） | `mvn -pl data-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `DataApplication` |
+| 3 | trade（`8082`） | `mvn -pl trade-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `TradeApplication` |
+| 4 | analysis（`8083`） | `mvn -pl analysis-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `AnalysisApplication` |
+| 5 | gateway（`8080`） | `mvn -pl gateway-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `GatewayApplication` |
+
+IDE 中每个启动配置的 **Active profiles** 都填 `local`，或在 **Program arguments** 中填写 `--spring.profiles.active=local`。日志应出现 `The following 1 profile is active: "local"`。本地配置包含各服务一致的开发密钥，仅用于本机开发。
+
+如果数据库账号密码不同，在启动相关后端的同一个终端中先设置：
+
+```powershell
+$env:DB_USERNAME = '你的数据库用户名'
+$env:DB_PASSWORD = '你的数据库密码'
+```
+
+需要同步新行情时，在启动 **data-service** 的终端中设置 Tushare Token，再执行上表中的 data 启动命令；trade 的 Tushare 数据源需要时也设置同一变量：
+
+```powershell
+$env:TUSHARE_TOKEN = Read-Host '输入你的 Tushare Token'
+```
+
+未配置 Token 不影响登录和已有数据查询，但无法使用需要凭据的 Tushare 同步。历史练习和 K 线需要先有对应股票、区间的行情数据。
+
+### 4B. 启动后端：Nacos 模式
+
+与 4A 二选一，不要在相同端口重复运行两套后端。先启动 MySQL 和 Nacos；所有后端不要启用 `local`，并准备一致的 JWT、内部服务密钥。
+
+1. 若使用初始化脚本创建的 `admin` 账号，先以 `local` 启动 auth，登录后调用 `PUT /auth/password` 修改默认密码（请求头带 `Authorization: Bearer <登录返回的 token>`，JSON 请求体为 `{"oldPassword":"原密码","newPassword":"新的至少6位密码"}`）；当前账户页面没有改密入口。非 local 模式会拒绝带有已知默认管理员密码的数据库启动。
+2. 生成并保存一组随机密钥（JWT 至少 32 字符、内部密钥至少 16 字符），每个服务使用同一组；安装了 OpenSSL 时可分别运行 `openssl rand -base64 64` 和 `openssl rand -base64 24`。不要每启动一个服务就重新生成。
+3. 在每个后端终端中先设置以下配置，再执行后面的启动命令。`SPRING_APPLICATION_JSON` 显式映射内部密钥到 `fuli.internal-key`，并让所有服务的 Nacos 配置中心地址保持一致：
+
+```powershell
+$env:NACOS_SERVER = '127.0.0.1:8848'
+$env:JWT_SECRET = Read-Host '输入已保存的共用 JWT 密钥'
+$env:INTERNAL_KEY = Read-Host '输入已保存的共用内部服务密钥'
+$env:SPRING_APPLICATION_JSON = @{
+    'jwt.secret' = $env:JWT_SECRET
+    'fuli.internal-key' = $env:INTERNAL_KEY
+    'spring.cloud.nacos.config.server-addr' = $env:NACOS_SERVER
+} | ConvertTo-Json -Compress
+```
+
+数据库账号不同或需要同步行情时，还需设置 4A 中的 `DB_USERNAME`、`DB_PASSWORD`、`TUSHARE_TOKEN`。环境变量只对当前终端及它启动的进程生效；复制 [.env.example](.env.example) 为 `.env` **不会**让 `mvn spring-boot:run` 自动加载它，IDE 也需要配置相同的环境变量。
+
+在五个独立终端中按顺序执行，每个终端只运行一条启动命令：
+
+```powershell
+# 终端 1
+mvn -pl auth-service spring-boot:run
+# 终端 2
+mvn -pl data-service spring-boot:run
+# 终端 3
+mvn -pl trade-service spring-boot:run
+# 终端 4
+mvn -pl analysis-service spring-boot:run
+# 终端 5
+mvn -pl gateway-service spring-boot:run
+```
+
+确认没有遗留的 `SPRING_PROFILES_ACTIVE=local` 或 IDE local 启动参数。默认读取 Nacos `DEFAULT_GROUP` 中各自的 `auth-service.yaml`、`data-service.yaml`、`trade-service.yaml`、`analysis-service.yaml`、`gateway-service.yaml`；导入为可选，未发布远程配置时保留仓库内配置，但服务注册与发现仍依赖 Nacos。可在注册服务列表中检查这五个服务是否正常上线。
+
+从 Nacos 模式切回 4A 时，在相应终端执行 `Remove-Item Env:SPRING_APPLICATION_JSON -ErrorAction SilentlyContinue`，避免之前的密钥和地址覆盖本地配置。
+
+### 5. 启动前端、登录并准备行情
+
+在第六个终端从项目根目录进入前端目录：
+
+```powershell
+Set-Location frontend
+npm run dev
+```
+
+浏览器打开 http://localhost:3000 。前端 `/api` 请求转发到本机 `8080` 网关，因此只启动前端无法登录或读取业务数据。没有账号时可在登录页点击“没有账号？去注册”，注册后登录。
+
+首次使用行情功能时，先在“数据同步”页面同步股票基础信息和所需区间的日线，再使用 K 线或 `/practice` 历史交易练习。Tushare Token 的权限需覆盖所选同步接口。
+
+### 6. AKTools / AKShare HTTP 服务（按需）
+
+在单独终端安装依赖（首次）：
+
+```powershell
+python -m pip install aktools akshare
+```
+
+Windows 推荐使用已实测的直接启动命令，保持终端运行：
+
+```powershell
+python -m uvicorn aktools.main:app --host 127.0.0.1 --port 8090
+```
+
+也可使用 AKTools 启动器：
+
+```powershell
+python -m aktools --host 127.0.0.1 --port 8090
+```
+
+AKTools 默认使用 `8080`，与网关冲突，因此本文统一指定 `8090`。看到 `Uvicorn running on http://127.0.0.1:8090` 后，访问 http://127.0.0.1:8090/docs 查看接口，http://127.0.0.1:8090/version 查看版本信息。安装和默认启动方式见[官方文档](https://aktools.akfamily.xyz/)。
+
+AKTools 0.0.91 的启动器未正确处理带空格的 Python 路径，出现 `'C:\Program' 不是内部或外部命令` 时，使用上面的 `python -m uvicorn ...` 命令即可绕过。仅打印“点击打开 HTTP API 主页”后就退出，表示服务尚未成功启动。`RequestsDependencyWarning` 是 Python HTTP 依赖版本兼容警告，可用 `python -m pip check` 检查；它与该路径错误、Nacos 连接失败分别处理。
+
+### 7. 确认启动成功、常见问题与停止方式
+
+完整功能启动后应监听 `3306`、`8080`～`8084`、`3000`；Nacos 模式另有 `8848/9848`。可选的 Redis、AKTools 分别使用 `6379`、`8090`。Windows 可检查：
+
+```powershell
+Get-NetTCPConnection -State Listen |
+    Where-Object { $_.LocalPort -in 3306,6379,8848,9848,8080,8081,8082,8083,8084,3000,8090 } |
+    Select-Object LocalAddress,LocalPort,OwningProcess
+```
+
+- Java 服务应出现各自的 `Started ...Application`；不能只用 Maven 的 `BUILD SUCCESS` 判断应用已启动。
+- 未登录访问 `http://localhost:8081/auth/profile` 返回 HTTP `401` 是预期鉴权行为，可确认 auth 已提供 HTTP 服务；数据库与完整业务仍需通过登录和页面操作验证。
+- 出现 `Server check fail ... 127.0.0.1, port 9848`、`UNAVAILABLE: io exception`、`Connection refused`：检查 Nacos `8848/9848`，或确认所有后端都已启用 `local`。启动 AKTools 无法解决 Nacos 错误。
+- 出现 `InternalServiceFilter.class ... does not exist` 或其他 `common-api` 类缺失：在项目根目录执行 `mvn clean install -DskipTests`，IDE 重新加载 Maven，再重启后端。
+- 前端 API 报连接失败或网关 `503`：检查网关、对应后端是否运行，以及是否混用了 local 与 Nacos 模式；本地端口改动后，也需同步网关路由、Feign 地址和前端代理。
+- 端口已占用：先用上面的命令确认已有服务，不要重复启动；AKTools 尤其不要占用网关的 `8080`。
+
+停止时，先在前端、gateway、analysis、trade、data、auth、AKTools 各自的终端按 `Ctrl+C`，再停止本次启动的基础设施。Compose 服务可按需执行：
+
+```powershell
+docker compose stop mysql redis nacos
+```
+
+只停止需要停止的服务即可；手工启动的 Nacos 在其 `bin` 目录执行 `.\shutdown.cmd`，本机 MySQL 则从“服务”管理器停止。下次日常启动只需依次启动基础设施、五个后端和前端；无需重新建库、安装依赖或重新生成密钥。
+
+## 验证
+
+```bash
+# 项目根目录（使用 JDK 17+）
+mvn -B test
+
+# frontend 目录
+npm test
+npm run build
+```
+
+后端回归使用 H2 或隔离的 HTTP/过滤器测试，不需要本机 MySQL、Nacos 或行情凭据。前端单测使用真实 Vue 模板和模拟图表 API。练习页另有真实浏览器回归：在 `frontend` 下先构建，再运行 `node tests/practice-browser-smoke.mjs`，使用已安装的 Chrome/Edge（也可用 `CHROME_PATH` 指定路径）、真实生产包和固定接口数据验证标注、委托、推进、恢复、复盘及手机宽度；截图与结果保存到忽略目录 `.browser-smoke`。此检查与后端 HTTP 测试分开运行，尚未覆盖 MySQL 与全部微服务的真实行情联调。
+
+历史行情录入的卖出价格按交易当天实际最低价、最高价校验；缺少当天完整行情时需先同步。
+
+买入提交时会同步扣减可用资金，余额不足直接拒单（不写入交易记录）；卖出按 A 股 T+1 校验可卖数量，当日买入的部分需下一交易日才可卖出。
+
+## 历史交易练习
+
+已有数据库先在 MySQL 客户端执行 `source sql/practice.sql`，仅新增练习表，不删除原交易数据；新建库执行上面的初始化脚本已包含此表。
+
+1. 在“数据同步”中同步所选 A 股的未复权日线（代码如 `600519.SH`），覆盖起点前的背景和整个练习区间。
+2. 打开侧栏“历史交易练习”（`/practice`），输入股票、起止日期和初始资金（默认 10 万元）。起点是最初可见行情的截止日，之前最多 120 根日线作为分析背景。
+3. 在当前决策日提交固定股数的买单或卖单；点“揭晓下一日”后，才按新一天的开盘价尝试成交。100 股整数倍，资金或可卖股数不足则整单拒绝；推进前可撤销或替换待成交单。
+4. 可绘制练习专属画线、手工买卖点，浏览已揭晓历史；已成交交易不能撤回。重新打开练习可恢复进度，也可以另建练习重新开始。
+5. 到达终点自动结束，也可提前结束。复盘展示完整所选走势、逐笔成交、账户/买入持有基准收益、费用和收盘最大回撤；指标冻结到实际结束日，剩余持仓只估值、不强制卖出。
+
+练习只使用创建时冻结的服务端行情快照，与正式账户和普通图表标注独立。仅支持 A 股日线，采用固定训练费率（双向佣金万三、最低 5 元，卖出印花税万五）与简化 T+1 撮合；无记录日跳过，无量或一字线不成交，不模拟历史费率、分红送转、滑点或涨跌停排队。数据缺失或价格口径断层时需同步并核查数据后重试。详见[已确认规则](docs/superpowers/specs/2026-10-24-repairs-and-blind-replay-design.md)与[接口契约](docs/superpowers/specs/2026-10-24-practice-api.md)。
 
 ## 项目结构
 
@@ -77,5 +319,6 @@ fuli/
 
 ## 文档
 
+- [修复回归记录（2026-10-24）](doc/Repair-Verification-2026-10-24.md) - 已修复行为、验证结果和剩余范围
 - [开发进度](docs/开发进度.md) - 详细功能列表与启动方式
 - [项目总结](doc/Project.md) - 架构总结与改进建议

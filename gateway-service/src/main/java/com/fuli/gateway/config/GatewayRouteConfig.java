@@ -5,6 +5,7 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 import jakarta.annotation.PostConstruct;
 
@@ -20,25 +21,25 @@ public class GatewayRouteConfig {
     /**
      * 路由配置。
      *
-     * <p>默认使用 {@code http://localhost:8081/8082/...} 直连本地服务，
-     * 适用于开发环境。生产环境可配合 Nacos 替换为 {@code lb://服务名} 负载均衡。
+     * <p>默认通过服务发现路由，local profile 使用 fuli.routes.* 覆盖为直连地址。
+     * 路由只在此处声明，避免与 YAML 中的同名路由重复注册。
      */
     @Bean
-    public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
+    public RouteLocator customRouteLocator(RouteLocatorBuilder builder, Environment environment) {
         log.info("Creating customRouteLocator bean");
         return builder.routes()
-                .route("auth-service", r -> r.path("/api/auth/**", "/api/watchlist/**")
+                .route("auth-service", r -> r.path("/api/auth/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8081"))
+                        .uri(environment.getProperty("fuli.routes.auth", "lb://auth-service")))
                 .route("trade-service", r -> r.path("/api/trade/**", "/api/stock/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8082"))
+                        .uri(environment.getProperty("fuli.routes.trade", "lb://trade-service")))
                 .route("analysis-service", r -> r.path("/api/analysis/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8083"))
+                        .uri(environment.getProperty("fuli.routes.analysis", "lb://analysis-service")))
                 .route("data-service", r -> r.path("/api/data/**")
                         .filters(f -> f.stripPrefix(1))
-                        .uri("http://localhost:8084"))
+                        .uri(environment.getProperty("fuli.routes.data", "lb://data-service")))
                 .build();
     }
 }

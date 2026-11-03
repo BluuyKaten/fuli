@@ -51,22 +51,21 @@
       <div class="marker-group">
         <button
           :class="['marker-btn', { active: markerMode === '' }]"
-          @click="markerMode = ''"
+          @click="setMarkerMode('')"
         >标记关</button>
         <button
           :class="['marker-btn', { active: markerMode === 'buy' }]"
-          @click="markerMode = 'buy'"
+          @click="setMarkerMode('buy')"
         >买入标记</button>
         <button
           :class="['marker-btn', { active: markerMode === 'sell' }]"
-          @click="markerMode = 'sell'"
+          @click="setMarkerMode('sell')"
         >卖出标记</button>
       </div>
 
       <!-- 主题切换 -->
       <button class="toolbar-icon-btn" @click="toggleTheme" :title="currentThemeName === 'dark' ? '切换亮色' : '切换暗色'">
-        <span v-if="currentThemeName === 'dark'">☀</span>
-        <span v-else>☾</span>
+        <AppIcon :name="currentThemeName === 'dark' ? 'sun' : 'moon'" :size="14" />
       </button>
 
       <!-- 导出 -->
@@ -84,18 +83,16 @@
     </div>
 
     <!-- 图表区（含 canvas 叠加层 + 信息面板） -->
-    <div class="chart-wrapper">
+    <div
+      class="chart-wrapper"
+      :class="{ 'tool-active': currentTool || markerMode, 'select-mode': isSelectMode }"
+      @mousedown.capture="onCanvasMouseDown"
+      @mousemove.capture="onCanvasMouseMove"
+      @mouseup.capture="onCanvasMouseUp"
+      @mouseleave="onCanvasMouseUp"
+    >
       <div ref="chartContainer" class="chart-container" />
-      <canvas
-        ref="drawingCanvas"
-        class="drawing-canvas"
-        :class="{ active: currentTool, 'select-mode': isSelectMode }"
-        @mousedown="onCanvasMouseDown"
-        @mousemove="onCanvasMouseMove"
-        @mouseup="onCanvasMouseUp"
-        @mouseleave="onCanvasMouseUp"
-        @wheel="onCanvasWheel"
-      />
+      <canvas ref="drawingCanvas" class="drawing-canvas" />
       <!-- 信息面板（内联简单展示，Task 13 将替换为 InfoPanel 组件） -->
       <div v-if="panelData" class="info-panel">
         <div class="info-row">
@@ -135,7 +132,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch, computed, nextTick } from 'vue'
-import type { ISeriesApi } from 'lightweight-charts'
+import type { ISeriesApi, Time, UTCTimestamp } from 'lightweight-charts'
 import { message } from 'ant-design-vue'
 import {
   getStockMinuteData,
@@ -145,6 +142,7 @@ import {
   saveDrawing
 } from '@/api/kline'
 import { toTushareCode } from '@/utils/stockCode'
+import AppIcon from '@/components/ui/AppIcon.vue'
 import type { CandleItem } from '@/types/indicators'
 import type { ChartTheme } from '@/types/chart'
 import { useChartCore } from '@/composables/useChartCore'
@@ -182,7 +180,7 @@ interface RawKlineItem {
 
 // --- 成交量数据格式 ---
 interface VolumeItem {
-  time: string | number
+  time: Time
   value: number
   color: string
 }
@@ -199,16 +197,16 @@ const chartCore = useChartCore(chartContainer)
 const { chart, initChart, applyTheme, addCandlestickSeries, addHistogramSeries, destroyChart } = chartCore
 
 const { currentTheme, currentThemeName, toggleTheme: toggleThemeBase } = useChartTheme()
-const { activeIndicators, updateIndicators, saveIndicators } = useIndicators(chart, currentTheme)
+const { activeIndicators, updateIndicators, saveIndicators, clearAllIndicators } = useIndicators(chart, currentTheme)
 
 // candleSeries ref：用于传递给 useTradeMarkers
-const candleSeries = ref<ISeriesApi<any> | null>(null)
-const { loadAutoMarkers, addManualMarker } = useTradeMarkers(chart, candleSeries)
+const candleSeries = ref<ISeriesApi<'Candlestick'> | null>(null)
+const { loadAutoMarkers, addManualMarker, disposeMarkers } = useTradeMarkers(candleSeries)
 
 const {
-  currentTool, initCanvas, startDraw, addPoint, updateMousePosition,
-  selectDrawing, startDrag, endDrag, drawings, selectedId, deleteDrawing, clearDrawings,
-  loadDrawings, redraw, subscribeChartMove, unsubscribeChartMove
+  currentTool, initCanvas, startDraw, cancelDraw, addPoint, updateMousePosition,
+  selectDrawing, startDrag, endDrag, isDragging, drawings, selectedId, deleteDrawing, clearDrawings,
+  loadDrawings, redraw, subscribeChartMove, disposeDrawingTools
 } = useDrawingTools(chart, drawingCanvas, candleSeries)
 
 const { exporting, exportPNG, exportCSV } = useChartExport(chartContainer)
@@ -290,33 +288,33 @@ const formatNum = (n: number | null | undefined): string => {
 }
 
 // --- 时间解析（返回 Lightweight Charts 格式） ---
-const parseTime = (t: string | number | undefined | null, isDaily: boolean): string | number => {
+const parseTime = (t: string | number | undefined | null, isDaily: boolean): Time => {
   if (!t && t !== 0) {
     const now = new Date()
-    return isDaily ? now.toISOString().slice(0, 10) : Math.floor(now.getTime() / 1000)
+    return isDaily ? now.toISOString().slice(0, 10) : Math.floor(now.getTime() / 1000) as UTCTimestamp
   }
   const s = String(t).trim()
   // 8位数字格式：20200529 → 2020-05-29
   if (/^\d{8}$/.test(s)) {
     const formatted = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
-    return isDaily ? formatted : Math.floor(new Date(formatted + 'T00:00:00+08:00').getTime() / 1000)
+    return isDaily ? formatted : Math.floor(new Date(formatted + 'T00:00:00+08:00').getTime() / 1000) as UTCTimestamp
   }
   // 已经是 YYYY-MM-DD 格式
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-    return isDaily ? s : Math.floor(new Date(s + 'T00:00:00+08:00').getTime() / 1000)
+    return isDaily ? s : Math.floor(new Date(s + 'T00:00:00+08:00').getTime() / 1000) as UTCTimestamp
   }
   // 带时间格式 2024-01-02 10:30
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
     const ts = new Date(s.replace(' ', 'T') + '+08:00').getTime()
-    return isDaily ? s.slice(0, 10) : Math.floor(ts / 1000)
+    return isDaily ? s.slice(0, 10) : Math.floor(ts / 1000) as UTCTimestamp
   }
   // 数字时间戳
   const n = Number(s)
   if (!isNaN(n)) {
     return isDaily ? new Date(n > 1e12 ? n : n * 1000).toISOString().slice(0, 10)
-      : (n > 1e12 ? Math.floor(n / 1000) : n)
+      : (n > 1e12 ? Math.floor(n / 1000) : n) as UTCTimestamp
   }
-  return isDaily ? s : Math.floor(Date.now() / 1000)
+  return isDaily ? s : Math.floor(Date.now() / 1000) as UTCTimestamp
 }
 
 // --- 切换周期 ---
@@ -345,12 +343,28 @@ const toggleTheme = () => {
 
 // --- 画线工具 ---
 const startDrawTool = (tool: DrawingType) => {
+  markerMode.value = ''
   startDraw(tool)
 }
 
+const setMarkerMode = (mode: '' | 'buy' | 'sell') => {
+  cancelDraw()
+  markerMode.value = mode
+}
+
+const exitTools = () => {
+  markerMode.value = ''
+  cancelDraw()
+}
+
 // --- Canvas 鼠标按下（选择 / 画线 / 拖拽控制点 / 手动标记） ---
+const consumeMouseEvent = (e: MouseEvent) => {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
 const onCanvasMouseDown = (e: MouseEvent) => {
-  if (!drawingCanvas.value) return
+  if (e.button !== 0 || !drawingCanvas.value) return
   const rect = drawingCanvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
@@ -361,37 +375,23 @@ const onCanvasMouseDown = (e: MouseEvent) => {
     const time = chart.value.timeScale().coordinateToTime(x)
     const price = candleSeries.value.coordinateToPrice(y)
     if (time == null || price == null) return
-    addManualMarker(markerMode.value, time as string, price)
+    consumeMouseEvent(e)
+    addManualMarker(markerMode.value, time, price)
     return
   }
 
   // 未选择画线工具（或为"选择"模式）时：先尝试拖拽控制点，再尝试选中
   if (!currentTool.value || currentTool.value === 'select') {
-    if (startDrag(x, y)) return // 命中控制点，开始拖拽
-    if (selectDrawing(x, y)) return // 命中线，已选中
-    // 未命中任何画线：临时穿透事件给图表，允许拖拽图表
-    passthroughToChart()
+    if (startDrag(x, y) || selectDrawing(x, y)) {
+      consumeMouseEvent(e)
+    }
+    // 未命中时让同一次 mousedown 继续到图表，保留首次拖拽。
     return
   }
 
   // 画线模式：添加点
+  consumeMouseEvent(e)
   addPoint(x, y)
-}
-
-// --- 临时穿透事件给图表（允许拖拽/缩放 K 线图） ---
-let passthroughRestore: (() => void) | null = null
-const passthroughToChart = () => {
-  const canvas = drawingCanvas.value
-  if (!canvas || passthroughRestore) return
-  canvas.style.pointerEvents = 'none'
-  // 在 document 上监听 mouseup，松开后恢复
-  const restore = () => {
-    if (drawingCanvas.value) drawingCanvas.value.style.pointerEvents = ''
-    passthroughRestore = null
-    document.removeEventListener('mouseup', restore)
-  }
-  passthroughRestore = restore
-  document.addEventListener('mouseup', restore)
 }
 
 // --- Canvas 鼠标移动（预览线 / 拖拽更新） ---
@@ -400,26 +400,14 @@ const onCanvasMouseMove = (e: MouseEvent) => {
   const rect = drawingCanvas.value.getBoundingClientRect()
   const x = e.clientX - rect.left
   const y = e.clientY - rect.top
+  if (isDragging.value || currentTool.value || markerMode.value) consumeMouseEvent(e)
   updateMousePosition(x, y)
 }
 
 // --- Canvas 鼠标松开（结束拖拽） ---
-const onCanvasMouseUp = () => {
+const onCanvasMouseUp = (e: MouseEvent) => {
+  if (isDragging.value) consumeMouseEvent(e)
   endDrag()
-}
-
-// --- 滚轮缩放穿透（选择模式下允许缩放 K 线图） ---
-let wheelRestoreTimer: ReturnType<typeof setTimeout> | null = null
-const onCanvasWheel = () => {
-  const canvas = drawingCanvas.value
-  if (!canvas) return
-  canvas.style.pointerEvents = 'none'
-  if (wheelRestoreTimer) clearTimeout(wheelRestoreTimer)
-  // 滚轮停止 150ms 后恢复拦截
-  wheelRestoreTimer = setTimeout(() => {
-    if (drawingCanvas.value) drawingCanvas.value.style.pointerEvents = ''
-    wheelRestoreTimer = null
-  }, 150)
 }
 
 // --- 导出 ---
@@ -459,7 +447,7 @@ const loadData = async () => {
     // 转换为 Lightweight Charts 格式
     const isDaily = ['1D', '1W', '1M'].includes(currentPeriod.value)
     const candles: CandleItem[] = data.map((d) => ({
-      time: parseTime(d.time ?? d.tradeDate, isDaily) as string | number,
+      time: parseTime(d.time ?? d.tradeDate, isDaily),
       open: Number(d.open ?? d.openPrice ?? 0),
       high: Number(d.high ?? d.highPrice ?? 0),
       low: Number(d.low ?? d.lowPrice ?? 0),
@@ -468,7 +456,7 @@ const loadData = async () => {
     }))
 
     const volumes: VolumeItem[] = data.map((d) => ({
-      time: parseTime(d.time ?? d.tradeDate, isDaily) as string | number,
+      time: parseTime(d.time ?? d.tradeDate, isDaily),
       value: Number(d.volume ?? d.vol ?? 0),
       color: Number(d.close ?? d.closePrice ?? 0) >= Number(d.open ?? d.openPrice ?? 0) ? '#ef535080' : '#26a69a80'
     }))
@@ -477,11 +465,11 @@ const loadData = async () => {
     dailyData.value = candles
 
     // 更新 K 线系列
-    candleSeries.value?.setData(candles as any)
+    candleSeries.value?.setData(candles)
 
     // 更新成交量系列
     if (volumeSeries) {
-      volumeSeries.setData(volumes as any)
+      volumeSeries.setData(volumes)
     }
 
     // 刷新指标渲染
@@ -502,7 +490,7 @@ const loadData = async () => {
 }
 
 // --- 成交量系列引用 ---
-let volumeSeries: ISeriesApi<any> | null = null
+let volumeSeries: ISeriesApi<'Histogram'> | null = null
 
 // --- 初始化图表 ---
 const initChartInstance = () => {
@@ -562,6 +550,7 @@ watch(currentTheme, (newTheme) => {
 
 // --- 监听周期变化 ---
 watch(currentPeriod, async () => {
+  exitTools()
   drawings.value = [] // 立即清空画线
   selectedId.value = null
   redraw()
@@ -573,6 +562,7 @@ watch(currentPeriod, async () => {
 
 // --- 监听股票变化 ---
 watch(() => props.stockCode, async () => {
+  exitTools()
   if (props.stockCode) {
     currentPeriod.value = '1D'
     // 从本地存储读取股票信息
@@ -629,6 +619,12 @@ onMounted(() => {
 
 // --- 键盘事件（删除选中画线）---
 const onKeyDown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    exitTools()
+    return
+  }
+  const target = e.target
+  if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (selectedId.value) {
       deleteDrawing(selectedId.value)
@@ -647,7 +643,9 @@ const clearAllDrawings = () => {
 onBeforeUnmount(() => {
   resizeObserver.value?.disconnect()
   unsubscribeCrosshair()
-  unsubscribeChartMove()
+  disposeDrawingTools()
+  disposeMarkers()
+  clearAllIndicators()
   destroyChart()
   window.removeEventListener('keydown', onKeyDown) // 移除键盘监听
   // 组件卸载前保存画线（防止切换股票时组件销毁导致数据丢失）
@@ -886,13 +884,11 @@ const saveDrawingsOnUnmount = () => {
   z-index: 5;
 }
 
-.drawing-canvas.active {
-  pointer-events: auto;
+.chart-wrapper.tool-active :deep(canvas) {
   cursor: crosshair;
 }
 
-/* 选择模式下保持接收鼠标事件，但使用默认光标 */
-.drawing-canvas.select-mode {
+.chart-wrapper.select-mode :deep(canvas) {
   cursor: default;
 }
 

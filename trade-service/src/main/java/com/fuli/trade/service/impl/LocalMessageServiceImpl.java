@@ -16,6 +16,9 @@ import java.util.UUID;
 @Service
 public class LocalMessageServiceImpl implements LocalMessageService {
 
+    /** 抢占租约：期间其他实例不会重复处理同一条消息 */
+    private static final long CLAIM_LEASE_MINUTES = 5;
+
     private final LocalMessageMapper localMessageMapper;
     private final List<DeadLetterNotifier> deadLetterNotifiers;
 
@@ -43,6 +46,18 @@ public class LocalMessageServiceImpl implements LocalMessageService {
     @Override
     public void markSuccess(Long messageId) {
         localMessageMapper.markSuccess(messageId, LocalMessage.STATUS_SUCCESS);
+    }
+
+    @Override
+    public void markSuccessByMsgId(String msgId) {
+        if (msgId == null || msgId.isBlank()) {
+            return;
+        }
+        int affected = localMessageMapper.markSuccessByMsgId(msgId, LocalMessage.STATUS_SUCCESS);
+        if (affected == 0) {
+            // 买入流程已改为同步扣款，不会再写扣款消息；此处忽略属于正常情况
+            log.debug("消息无需标记成功: msgId={}", msgId);
+        }
     }
 
     @Override
@@ -77,6 +92,16 @@ public class LocalMessageServiceImpl implements LocalMessageService {
                         .orderByAsc(LocalMessage::getNextRetryTime)
                         .last("LIMIT " + limit)
         );
+    }
+
+    @Override
+    public boolean tryClaim(LocalMessage message) {
+        if (message == null || message.getId() == null) {
+            return false;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        return localMessageMapper.claimMessage(message.getId(), now,
+                now.plusMinutes(CLAIM_LEASE_MINUTES)) == 1;
     }
 
     /** 触发所有注册的死信告警通知器，单个通知器异常不影响其他 */

@@ -7,6 +7,7 @@ import com.fuli.trade.entity.RealtimeQuote;
 import com.fuli.trade.mapper.ChartDrawingMapper;
 import com.fuli.trade.mapper.RealtimeQuoteMapper;
 import com.fuli.trade.service.StockDataRouterService;
+import com.fuli.trade.service.StockService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,6 +26,8 @@ public class KlineController {
     private final StockDataRouterService routerService;
     private final RealtimeQuoteMapper realtimeQuoteMapper;
     private final ChartDrawingMapper chartDrawingMapper;
+    private final StockService stockService;
+    private final jakarta.servlet.http.HttpServletRequest request;
 
     /**
      * 分钟 K 线
@@ -59,14 +62,28 @@ public class KlineController {
 
     /**
      * 实时行情快照（5 档）
+     *
+     * <p>优先读实时快照表；当前项目未接入实时行情源，该表为空，
+     * 此时退化为 data-service 的最新日线收盘价（真实数据）。
+     * 历史版本在这里返回定时任务随机生成的模拟盘口，已移除。
      */
     @GetMapping("/quote")
     public Result<Map<String, Object>> quote(@RequestParam String code) {
         String tushareCode = code.contains(".") ? code : code + getSuffix(code);
+
         RealtimeQuote quote = realtimeQuoteMapper.selectById(tushareCode);
-        if (quote == null) {
-            return Result.error("无行情数据");
+        if (quote != null) {
+            return Result.success(buildRealtimeQuote(quote));
         }
+
+        Map<String, Object> latest = stockService.getLatestPrice(tushareCode);
+        if (latest == null || latest.get("closePrice") == null) {
+            return Result.error("暂无 " + tushareCode + " 的行情数据，请先在数据同步页同步日线");
+        }
+        return Result.success(buildDailyQuote(tushareCode, latest));
+    }
+
+    private Map<String, Object> buildRealtimeQuote(RealtimeQuote quote) {
         Map<String, Object> map = new HashMap<>();
         map.put("stockCode", quote.getStockCode());
         map.put("price", quote.getClosePrice());
@@ -88,29 +105,71 @@ public class KlineController {
         orderBook.put("bids", bids);
         orderBook.put("asks", asks);
         map.put("orderBook", orderBook);
+        map.put("source", "realtime");
+        map.put("stale", false);
         map.put("timestamp", quote.getUpdateTime() != null ? quote.getUpdateTime().toString() : "");
+        return map;
+    }
 
-        return Result.success(map);
+    /**
+     * 无实时源时的降级响应：价格取最新日线收盘，五档为空数组（前端渲染"暂无五档"）。
+     */
+    private Map<String, Object> buildDailyQuote(String tushareCode, Map<String, Object> latest) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("stockCode", tushareCode);
+        map.put("price", latest.get("closePrice"));
+        map.put("preClose", latest.get("preClose"));
+        map.put("open", null);
+        map.put("high", null);
+        map.put("low", null);
+        map.put("volume", null);
+        map.put("amount", null);
+
+        Map<String, Object> emptySide = new HashMap<>();
+        emptySide.put("prices", new Object[0]);
+        emptySide.put("volumes", new Object[0]);
+        Map<String, Object> orderBook = new HashMap<>();
+        orderBook.put("bids", emptySide);
+        orderBook.put("asks", emptySide);
+        map.put("orderBook", orderBook);
+        map.put("source", "daily");
+        map.put("stale", true);
+        map.put("timestamp", latest.get("tradeDate") != null ? latest.get("tradeDate").toString() : "");
+        return map;
     }
 
     /**
      * 保存画线
      */
     @PostMapping("/drawing")
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public Result<Void> saveDrawing(@RequestBody Map<String, Object> payload) {
+        Long userId = com.fuli.common.api.security.AuthenticatedUser.requireId(request);
+        if (!(payload.get("stockCode") instanceof String stockCode) || stockCode.isBlank()
+                || !(payload.get("period") instanceof String period) || period.isBlank()
+                || !(payload.get("data") instanceof String data) || data.isBlank()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "股票代码、周期和画线数据不能为空；清空画线请传 []");
+        }
         ChartDrawing drawing = new ChartDrawing();
-        drawing.setUserId(Long.parseLong(payload.get("userId").toString()));
-        drawing.setStockCode((String) payload.get("stockCode"));
-        drawing.setPeriod((String) payload.get("period"));
-        drawing.setDrawingData(payload.get("data").toString());
+        drawing.setUserId(userId);
+        drawing.setStockCode(stockCode);
+        drawing.setPeriod(period);
 
-        // 先删除旧的，再插入
+        // 先删除旧的
         chartDrawingMapper.delete(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ChartDrawing>()
                         .eq("user_id", drawing.getUserId())
                         .eq("stock_code", drawing.getStockCode())
                         .eq("period", drawing.getPeriod())
         );
+
+        // 如果数据为空数组，不插入（相当于删除）
+        if ("[]".equals(data.trim())) {
+            return Result.success();
+        }
+
+        drawing.setDrawingData(data);
         chartDrawingMapper.insert(drawing);
         return Result.success();
     }
@@ -120,9 +179,10 @@ public class KlineController {
      */
     @GetMapping("/drawing")
     public Result<Map<String, Object>> loadDrawing(
-            @RequestParam Long userId,
+            @RequestParam(required = false) Long userId,
             @RequestParam String code,
             @RequestParam(defaultValue = "1D") String period) {
+        userId = com.fuli.common.api.security.AuthenticatedUser.requireId(request);
         ChartDrawing drawing = chartDrawingMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<ChartDrawing>()
                         .eq("user_id", userId)

@@ -1,3 +1,16 @@
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+    openfeign:
+      client:
+        config:
+          tradeFeignClient:
+            url: http://localhost:8082
+
 # 本地开发 Profile（auth-service）
 # 使用方式：spring.profiles.active=local
 #
@@ -12,3 +25,8 @@ fuli:
   internal-key: dev-only-internal-key-0123456789
   # 本地开发允许高敏感内部操作（如 resetCash），生产环境必须置为 false
   allow-dangerous-operations: true
+
+# 本地开发保留 SQL 日志；生产环境使用默认 slf4j 实现（不打印 SQL）。
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

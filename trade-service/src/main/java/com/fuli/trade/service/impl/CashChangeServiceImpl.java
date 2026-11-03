@@ -1,5 +1,7 @@
 package com.fuli.trade.service.impl;
 
+import com.fuli.common.api.Result;
+import com.fuli.common.api.exception.BusinessException;
 import com.fuli.common.api.feign.AuthFeignClient;
 import com.fuli.common.api.enums.TradeTypeEnum;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -24,18 +26,27 @@ public class CashChangeServiceImpl implements CashChangeService {
 
     @Override
     public void deductCash(Long userId, BigDecimal amount, String msgId) {
-        authFeignClient.deductCash(userId, amount, msgId);
+        requireConfirmed(authFeignClient.deductCash(userId, amount, msgId));
     }
 
     @Override
     public void addCash(Long userId, BigDecimal amount, String msgId) {
-        authFeignClient.addCash(userId, amount, msgId);
+        requireConfirmed(authFeignClient.addCash(userId, amount, msgId));
+    }
+
+    private void requireConfirmed(Result<Boolean> response) {
+        if (response == null || !Integer.valueOf(200).equals(response.getCode())
+                || !Boolean.TRUE.equals(response.getData())) {
+            String reason = response == null ? "未收到资金服务回执" : response.getMessage();
+            throw new BusinessException("资金变动未确认成功: " + reason);
+        }
     }
 
     @Override
     public void processCashChange(CashChangeMessage message) {
         if (message == null || message.getUserId() == null
-                || message.getAmount() == null || message.getMsgId() == null
+                || message.getAmount() == null || message.getAmount().signum() < 0
+                || message.getMsgId() == null || message.getMsgId().isBlank()
                 || message.getDirection() == null) {
             throw new IllegalArgumentException("资金变动消息字段不完整: " + message);
         }

@@ -2,12 +2,15 @@ package com.fuli.gateway.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fuli.common.api.Result;
+import com.fuli.common.api.util.TraceId;
 import com.fuli.gateway.util.JwtUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
 import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -26,18 +29,43 @@ public class JwtGlobalFilter implements GlobalFilter, Ordered {
 
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String TOKEN_PREFIX = "Bearer ";
+    private static final String BLACKLIST_PREFIX = "auth:blacklist:";
 
     private final JwtUtil jwtUtil;
+    private final ObjectProvider<ReactiveStringRedisTemplate> redisProvider;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public JwtGlobalFilter(JwtUtil jwtUtil) {
+    public JwtGlobalFilter(JwtUtil jwtUtil, ObjectProvider<ReactiveStringRedisTemplate> redisProvider) {
         this.jwtUtil = jwtUtil;
+        this.redisProvider = redisProvider;
     }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
+
+        // 生成/透传请求追踪 ID：优先沿用客户端传入（清洗防日志注入），否则生成一个。
+        String requestId = TraceId.sanitize(request.getHeaders().getFirst(TraceId.HEADER));
+        if (!StringUtils.hasText(requestId)) {
+            requestId = TraceId.generate();
+        }
+        final String traceId = requestId;
+        exchange.getResponse().getHeaders().set(TraceId.HEADER, traceId);
+
+        // Never expose service credentials or internal routes to external callers.
+        if (path.contains("%") || path.contains("\\") || java.util.Arrays.stream(path.split("/"))
+                .anyMatch(segment -> segment.split(";", 2)[0].equals("internal"))) {
+            exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+            return exchange.getResponse().setComplete();
+        }
+        request = request.mutate().headers(headers -> {
+            headers.remove("X-Internal-Key");
+            headers.remove("X-User-Id");
+            headers.remove("X-Username");
+            headers.set(TraceId.HEADER, traceId);
+        }).build();
+        exchange = exchange.mutate().request(request).build();
 
         if (isWhiteList(path)) {
             return chain.filter(exchange);
@@ -58,7 +86,20 @@ public class JwtGlobalFilter implements GlobalFilter, Ordered {
                     .header("X-User-Id", claims.get("userId", Long.class).toString())
                     .header("X-Username", claims.getSubject())
                     .build();
-            return chain.filter(exchange.mutate().request(mutatedRequest).build());
+            ServerWebExchange mutatedExchange = exchange.mutate().request(mutatedRequest).build();
+            String jti = claims.getId();
+            ReactiveStringRedisTemplate redis = redisProvider.getIfAvailable();
+            if (jti != null && redis != null) {
+                return redis.hasKey(BLACKLIST_PREFIX + jti)
+                        .onErrorResume(e -> {
+                            log.warn("查询令牌黑名单失败，按未拉黑处理（fail-open）: {}", e.getMessage());
+                            return Mono.just(false);
+                        })
+                        .flatMap(blacklisted -> blacklisted
+                                ? unauthorized(mutatedExchange.getResponse(), "令牌已失效，请重新登录")
+                                : chain.filter(mutatedExchange));
+            }
+            return chain.filter(mutatedExchange);
         } catch (Exception e) {
             log.error("JWT parse error: {}", e.getMessage());
             return unauthorized(exchange.getResponse(), "令牌解析失败");
@@ -81,7 +122,8 @@ public class JwtGlobalFilter implements GlobalFilter, Ordered {
                 || path.startsWith("/api/auth/login/")
                 || path.startsWith("/api/auth/register/")
                 || path.startsWith("/api/auth/captcha/")
-                || path.startsWith("/actuator/");
+                || path.startsWith("/actuator/health")
+                || path.startsWith("/actuator/info");
     }
 
     private String getTokenFromRequest(ServerHttpRequest request) {

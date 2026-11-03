@@ -1,12 +1,12 @@
 // rsi.ts - RSI 指标计算
-import type { CandleItem } from '@/types/indicators'
+import type { ClosePrice } from '@/types/indicators'
 
 /**
  * 计算 RSI 指标（相对强弱指数）
  * @param data K 线数据
  * @param period 计算周期（默认 14）
  */
-export function calcRSI(data: CandleItem[], period = 14): number[] {
+export function calcRSI(data: ClosePrice[], period = 14): number[] {
   if (data.length === 0) return []
   const result: number[] = new Array(data.length).fill(NaN)
   if (data.length < period + 1) return result
