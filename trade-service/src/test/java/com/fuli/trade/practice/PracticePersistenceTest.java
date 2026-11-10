@@ -48,7 +48,7 @@ class PracticePersistenceTest {
         jdbc.execute("CREATE TABLE IF NOT EXISTS practice_session(id VARCHAR(36) PRIMARY KEY,user_id BIGINT NOT NULL,stock_code VARCHAR(20),start_date VARCHAR(10),end_date VARCHAR(10),current_day VARCHAR(10),status VARCHAR(20),equity DECIMAL(18,2),initial_cash DECIMAL(18,2),version BIGINT NOT NULL,state_json LONGTEXT NOT NULL,snapshot_json LONGTEXT NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)");
         jdbc.update("DELETE FROM practice_session");
         reset(market);
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of(
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(
                 bar("20260105", "10", "10"), bar("20260106", "11", "12"), bar("20260107", "13", "13")));
     }
 
@@ -58,14 +58,14 @@ class PracticePersistenceTest {
         var ordered = service.order(1, initial.id(), new PracticeDtos.OrderRequest(initial.version(), "BUY", BigDecimal.valueOf(100)));
         var advanced = service.advance(1, initial.id(), new PracticeDtos.VersionRequest(ordered.version()));
         String originalSnapshot = snapshot(initial.id());
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("No market calls after create"));
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenThrow(new IllegalStateException("No market calls after create"));
         var restarted = new PracticeService(jdbc, new PracticeSnapshotLoader(market));
         assertEquals(advanced, restarted.get(1, initial.id()));
         assertEquals(originalSnapshot, snapshot(initial.id()));
         assertEquals(404, assertThrows(ResponseStatusException.class, () -> service.get(2, initial.id())).getStatusCode().value());
         assertTrue(service.list(2).isEmpty());
         assertEquals(1, service.list(1).size());
-        verify(market, times(1)).getDailyData(anyString(), anyString(), anyString());
+        verify(market, times(1)).getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class));
     }
 
     @Test

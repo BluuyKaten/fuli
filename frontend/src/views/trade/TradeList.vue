@@ -52,7 +52,6 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { getTradePage, deleteTrade, type TradeRecord, type TradeQueryParams } from '@/api/trade'
-import { toTushareCode } from '@/utils/stockCode'
 
 const router = useRouter()
 const loading = ref(false)
@@ -93,7 +92,7 @@ const loadData = async () => {
       ...queryForm,
       pageNum: pagination.current,
       pageSize: pagination.pageSize,
-      stockCode: queryForm.stockCode ? toTushareCode(queryForm.stockCode) : ''
+      stockCode: queryForm.stockCode || ''
     }
     if (dateRange.value) {
       params.startDate = dateRange.value[0].format('YYYY-MM-DD')

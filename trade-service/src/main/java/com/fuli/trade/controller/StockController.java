@@ -40,9 +40,17 @@ public class StockController {
     @GetMapping("/daily")
     public Result<List<Map<String, Object>>> daily(@RequestParam String stockCode,
                                                     @RequestParam(required = false) String startDate,
-                                                    @RequestParam(required = false) String endDate) {
-        List<Map<String, Object>> dataList = stockService.getDailyData(stockCode, startDate, endDate);
+                                                    @RequestParam(required = false) String endDate,
+                                                    @RequestParam(required = false) Integer limit) {
+        List<Map<String, Object>> dataList = stockService.getDailyData(stockCode, startDate, endDate, limit);
         return Result.success(dataList);
+    }
+
+    /** 全历史收盘价缩略序列，供 K 线底部全貌条使用 */
+    @GetMapping("/daily/sparkline")
+    public Result<List<Map<String, Object>>> dailySparkline(@RequestParam String stockCode,
+                                                            @RequestParam(defaultValue = "240") int points) {
+        return Result.success(stockService.getDailySparkline(stockCode, points));
     }
 
     /**

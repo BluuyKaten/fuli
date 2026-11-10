@@ -73,7 +73,7 @@ class TradeRecordServiceImplTest {
         positionSummaryMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>());
 
         // Mock data-service Feign:返回行情数据,避免卖出涨跌停校验阻塞
-        when(dataFeignClient.getDailyData(any(), any(), any()))
+        when(dataFeignClient.getDailyData(any(), any(), any(), nullable(Integer.class)))
                 .thenAnswer(invocation -> List.of(Map.<String, Object>of(
                         "preClose", new BigDecimal("100.00"),
                         "lowPrice", new BigDecimal("95.00"),

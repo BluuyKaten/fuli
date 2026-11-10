@@ -54,17 +54,17 @@ class PracticeSnapshotLoaderTest {
         for (int i = 0; i < 150; i++) rows.add(row(first.plusDays(i).format(DateTimeFormatter.BASIC_ISO_DATE)));
         var anchor = first.plusDays(147);
         java.util.Collections.reverse(rows);
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenReturn(rows);
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(rows);
         var snapshot = loader.load(inputs("600519", anchor.toString(), first.plusDays(149).toString(), null));
         assertEquals(120, snapshot.backgroundCount());
         assertEquals(122, snapshot.bars().size());
         assertEquals(anchor.toString(), snapshot.bars().get(119).date());
-        verify(market).getDailyData("600519.SH", anchor.minusYears(3).format(DateTimeFormatter.BASIC_ISO_DATE), first.plusDays(149).format(DateTimeFormatter.BASIC_ISO_DATE));
+        verify(market).getDailyData("600519.SH", anchor.minusYears(3).format(DateTimeFormatter.BASIC_ISO_DATE), first.plusDays(149).format(DateTimeFormatter.BASIC_ISO_DATE), null);
     }
 
     @Test
     void nonTradingStartUsesPreviousStoredDateAndNoMissingBarsAreInvented() {
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of(row("20260102"), row("20260106"), row("20260108")));
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(row("20260102"), row("20260106"), row("20260108")));
         var input = inputs("600519", "2026-01-05", "2026-01-08", null);
         var snapshot = loader.load(input);
         assertEquals(3, snapshot.bars().size());
@@ -94,19 +94,32 @@ class PracticeSnapshotLoaderTest {
         var future = row("20260106");
         future.put("preClose", new BigDecimal("10.05"));
         future.put("vol", BigDecimal.ZERO);
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of(row("20260105"), future));
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(row("20260105"), future));
         var snapshot = loader.load(inputs("600519", "2026-01-05", "2026-01-08", null));
         assertEquals(0, snapshot.bars().get(1).volume().signum());
+    }
+
+    @Test
+    void exDividendDownwardGapIsAcceptedWhileUpwardGapStaysRejected() {
+        var future = row("20260106");
+        future.put("preClose", new BigDecimal("9.60"));
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(row("20260105"), future));
+        var snapshot = loader.load(inputs("600519", "2026-01-05", "2026-01-08", null));
+        assertEquals(new BigDecimal("9.60"), snapshot.bars().get(1).preClose());
+
+        var upward = row("20260106");
+        upward.put("preClose", new BigDecimal("10.60"));
+        opaqueFailure(List.of(row("20260105"), upward));
     }
 
     @Test
     void missingAnchorOrNextBarRejectsAndUpstreamExceptionsNeverEchoTheirContents() {
         var input = inputs("600519", "2026-01-05", "2026-01-08", null);
         for (List<Map<String, Object>> rows : List.of(List.<Map<String, Object>>of(), List.of(row("20260105")), List.of(row("20260106")))) {
-            when(market.getDailyData(anyString(), anyString(), anyString())).thenReturn(rows);
+            when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(rows);
             assertEquals(400, assertThrows(ResponseStatusException.class, () -> loader.load(input)).getStatusCode().value());
         }
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenThrow(new IllegalStateException("2026-01-06 price99.8765 upward"));
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenThrow(new IllegalStateException("2026-01-06 price99.8765 upward"));
         var failure = assertThrows(ResponseStatusException.class, () -> loader.load(input));
         assertEquals(503, failure.getStatusCode().value());
         assertFalse(failure.getReason().contains("99.8765"));
@@ -114,7 +127,7 @@ class PracticeSnapshotLoaderTest {
     }
 
     private void opaqueFailure(List<Map<String, Object>> rows) {
-        when(market.getDailyData(anyString(), anyString(), anyString())).thenReturn(rows);
+        when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(rows);
         var failure = assertThrows(ResponseStatusException.class, () -> loader.load(inputs("600519", "2026-01-05", "2026-01-08", null)));
         assertEquals(400, failure.getStatusCode().value());
         assertEquals(PracticeSnapshotLoader.DATA_ERROR, failure.getReason());

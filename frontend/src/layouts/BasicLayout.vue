@@ -244,6 +244,7 @@ const sideItems: NavItem[] = [
   { key: 'PerformancePage', label: '绩效分析', icon: 'trophy', path: '/performance' },
   { key: 'ReportPage', label: '复盘报告', icon: 'activity', path: '/report' },
   { key: 'StockSync', label: '数据同步', icon: 'refresh', path: '/sync' },
+  { key: 'OkxSettings', label: 'OKX 账户', icon: 'lock', path: '/okx' },
   { key: 'AccountProfile', label: '账户信息', icon: 'user', path: '/account' }
 ]
 

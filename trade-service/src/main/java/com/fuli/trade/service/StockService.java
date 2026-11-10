@@ -7,7 +7,16 @@ public interface StockService {
 
     List<Map<String, Object>> searchStocks(String keyword);
 
-    List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate);
+    /**
+     * 获取股票日线行情。
+     *
+     * <p>{@code limit} 仅在未指定起止日期时生效（取最近 N 根）；指定区间时按区间返回，
+     * 因为练习模块要对整段区间做连续性校验，截断会让校验结论失真。
+     */
+    List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate, Integer limit);
+
+    /** 全历史收盘价缩略序列（服务端已降采样），供 K 线底部全貌条使用 */
+    List<Map<String, Object>> getDailySparkline(String stockCode, int points);
 
     Map<String, Object> getStockInfo(String stockCode);
 

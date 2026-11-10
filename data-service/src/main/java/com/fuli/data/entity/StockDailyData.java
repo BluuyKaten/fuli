@@ -28,7 +28,16 @@ public class StockDailyData implements Serializable {
 
     private String stockCode;
 
-    private String tradeDate;
+    /**
+     * 交易日期，整型 yyyyMMdd，如 20231103。
+     *
+     * <p>对应列类型为 {@code INT}（见 sql/migrations/V6__slim_daily_columns.sql）。
+     * 用整型而非字符串，是为了让区间条件走索引：INT 列与字符串参数比较会触发
+     * 隐式类型转换，导致 {@code uk_code_trade_date} 失效。
+     * 对外 API 仍在 {@code StockDataController#toMap} 里转回 "yyyyMMdd" 字符串，
+     * 保持前端与 Feign 调用方的契约不变。
+     */
+    private Integer tradeDate;
 
     private BigDecimal openPrice;
 

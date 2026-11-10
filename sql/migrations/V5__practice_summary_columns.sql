@@ -9,6 +9,6 @@ ALTER TABLE `practice_session`
     ADD COLUMN `start_date` VARCHAR(10) DEFAULT NULL COMMENT '起始日（摘要列）' AFTER `stock_code`,
     ADD COLUMN `end_date` VARCHAR(10) DEFAULT NULL COMMENT '结束日（摘要列）' AFTER `start_date`,
     ADD COLUMN `current_day` VARCHAR(10) DEFAULT NULL COMMENT '当前决策日（摘要列）' AFTER `end_date`,
-    ADD COLUMN `status` VARCHAR(20) DEFAULT NULL COMMENT '状态（摘要列）' AFTER `current_date`,
+    ADD COLUMN `status` VARCHAR(20) DEFAULT NULL COMMENT '状态（摘要列）' AFTER `current_day`,
     ADD COLUMN `equity` DECIMAL(18,2) DEFAULT NULL COMMENT '当前权益（摘要列）' AFTER `status`,
     ADD COLUMN `initial_cash` DECIMAL(18,2) DEFAULT NULL COMMENT '初始资金（摘要列）' AFTER `equity`;

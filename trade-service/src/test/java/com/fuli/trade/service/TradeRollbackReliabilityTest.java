@@ -101,14 +101,14 @@ class TradeRollbackReliabilityTest {
         when(data.getLatestPrice(anyString())).thenReturn(Map.of("preClose", new BigDecimal("100")));
         trades.createTrade(order(1, "10", 100, 2));
         assertNotNull(trades.createTrade(order(2, "20", 50, 3)));
-        verify(data).getDailyData("600519", "20250103", "20250103");
+        verify(data).getDailyData("600519", "20250103", "20250103", null);
         verify(data, never()).getLatestPrice(anyString());
     }
 
     @Test
     void missingTradeDayMustNotFallBackToLatestMarket() {
         readyMarket("20");
-        when(data.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of());
+        when(data.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of());
         trades.createTrade(order(1, "10", 100, 2));
         assertThrows(BusinessException.class, () -> trades.createTrade(order(2, "20", 50, 3)));
     }
@@ -116,7 +116,7 @@ class TradeRollbackReliabilityTest {
     @Test
     void historicalSaleWithTwentyPercentMoveUsesActualRange() {
         readyMarket("100");
-        when(data.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of(
+        when(data.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(
                 Map.of("tradeDate", "20250103", "preClose", new BigDecimal("100"),
                         "lowPrice", new BigDecimal("98"), "highPrice", new BigDecimal("120"))));
         trades.createTrade(order(1, "100", 100, 2));
@@ -126,7 +126,7 @@ class TradeRollbackReliabilityTest {
     @Test
     void historicalSaleOutsideActualRangeIsRejectedEvenWithinTenPercent() {
         readyMarket("100");
-        when(data.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of(
+        when(data.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(
                 Map.of("tradeDate", "20250103", "preClose", new BigDecimal("100"),
                         "lowPrice", new BigDecimal("99"), "highPrice", new BigDecimal("102"))));
         trades.createTrade(order(1, "100", 100, 2));
@@ -142,7 +142,7 @@ class TradeRollbackReliabilityTest {
                 Map.of("tradeDate", "20250102", "lowPrice", 18, "highPrice", 22),
                 Map.of("tradeDate", "20250103", "lowPrice", 22, "highPrice", 18),
                 Map.of("tradeDate", "20250103", "lowPrice", 0, "highPrice", 22))) {
-            when(data.getDailyData(anyString(), anyString(), anyString())).thenReturn(List.of(row));
+            when(data.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(row));
             assertThrows(BusinessException.class, () -> trades.createTrade(order(2, "20", 50, 3)));
         }
     }
@@ -152,8 +152,8 @@ class TradeRollbackReliabilityTest {
         // 行情库只认 600519.SH，裸代码必须补后缀后才能校验卖出价
         when(auth.deductCash(any(), any(), any())).thenReturn(Result.success(true));
         when(auth.addCash(any(), any(), any())).thenReturn(Result.success(true));
-        when(data.getDailyData(eq("600519"), anyString(), anyString())).thenReturn(List.of());
-        when(data.getDailyData(eq("600519.SH"), anyString(), anyString())).thenAnswer(inv ->
+        when(data.getDailyData(eq("600519"), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of());
+        when(data.getDailyData(eq("600519.SH"), anyString(), anyString(), nullable(Integer.class))).thenAnswer(inv ->
                 List.of(Map.<String, Object>of("tradeDate", inv.getArgument(1, String.class),
                         "lowPrice", new BigDecimal("98"), "highPrice", new BigDecimal("102"))));
 
@@ -168,7 +168,7 @@ class TradeRollbackReliabilityTest {
         when(auth.deductCash(any(), any(), any())).thenReturn(Result.success(true));
         when(auth.addCash(any(), any(), any())).thenReturn(Result.success(true));
         when(data.getLatestPrice(anyString())).thenReturn(Map.of("preClose", new BigDecimal(preClose)));
-        when(data.getDailyData(anyString(), anyString(), anyString())).thenAnswer(inv ->
+        when(data.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenAnswer(inv ->
                 List.of(Map.<String, Object>of("tradeDate", inv.getArgument(1, String.class),
                         "preClose", new BigDecimal(preClose),
                         "lowPrice", new BigDecimal(preClose).multiply(new BigDecimal("0.9")),

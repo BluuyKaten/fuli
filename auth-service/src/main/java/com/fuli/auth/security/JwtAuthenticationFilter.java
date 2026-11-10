@@ -26,6 +26,8 @@ public class JwtAuthenticationFilter extends BearerUserFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = com.fuli.common.api.security.RequestPaths.applicationPath(request);
         return path.equals("/auth/login") || path.equals("/auth/register") || path.equals("/auth/captcha")
+                // client_credentials 端点用客户端密钥认证，不需要 Bearer
+                || path.equals("/auth/oauth/token")
                 || path.equals("/auth/internal") || path.startsWith("/auth/internal/")
                 || path.startsWith("/actuator/health") || path.startsWith("/actuator/info");
     }

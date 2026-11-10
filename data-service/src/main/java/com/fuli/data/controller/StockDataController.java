@@ -1,21 +1,28 @@
 package com.fuli.data.controller;
 
-import com.fuli.data.entity.StockDailyData;
-import com.fuli.data.entity.StockInfo;
-import com.fuli.data.mapper.StockDailyDataMapper;
-import com.fuli.data.mapper.StockInfoMapper;
-import com.fuli.common.api.util.StockCodeUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fuli.common.api.util.StockCodeUtil;
+import com.fuli.data.entity.Bar;
+import com.fuli.data.entity.Instrument;
+import com.fuli.data.entity.StockInfo;
+import com.fuli.data.mapper.BarMapper;
+import com.fuli.data.mapper.InstrumentMapper;
+import com.fuli.data.mapper.StockInfoMapper;
+import com.fuli.data.repository.KlineQueryRepository;
+import com.fuli.data.service.KlineQueryService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +34,12 @@ import java.util.Set;
  * <p>trade-service / analysis-service 通过 {@code DataFeignClient} 调用此控制器获取行情数据，
  * 不再直接访问 data-service 的数据库表，消除服务边界耦合。
  *
+ * <p>阶段 0 起底层换成 {@code bar}（ADR-0007），但<b>对外契约一字未改</b>：
+ * {@code tradeDate} 仍是 {@code yyyyMMdd} 字符串、{@code preClose} 仍在、
+ * {@code vol}/{@code amount} 仍是同一批 key。唯一的口径变化是
+ * {@code vol} 从「手」变成「股」（×100）、{@code amount} 从「千元」变成「元」（×1000），
+ * 这是与美股/加密同列所必需的，前端量柱会自动缩放。
+ *
  * <p>注意：为避 Result 双重嵌套（data.data），直接返回数据本身，由调用方 Feign 客户端的原生返回类型接收。
  */
 @Slf4j
@@ -35,11 +48,18 @@ import java.util.Set;
 public class StockDataController {
 
     private final StockInfoMapper stockInfoMapper;
-    private final StockDailyDataMapper stockDailyDataMapper;
+    private final InstrumentMapper instrumentMapper;
+    private final BarMapper barMapper;
+    private final KlineQueryService klineQueryService;
 
-    public StockDataController(StockInfoMapper stockInfoMapper, StockDailyDataMapper stockDailyDataMapper) {
+    public StockDataController(StockInfoMapper stockInfoMapper,
+                               InstrumentMapper instrumentMapper,
+                               BarMapper barMapper,
+                               KlineQueryService klineQueryService) {
         this.stockInfoMapper = stockInfoMapper;
-        this.stockDailyDataMapper = stockDailyDataMapper;
+        this.instrumentMapper = instrumentMapper;
+        this.barMapper = barMapper;
+        this.klineQueryService = klineQueryService;
     }
 
     /**
@@ -58,49 +78,52 @@ public class StockDataController {
     /**
      * 获取股票日线行情。
      *
-     * <p>行情库统一使用带市场后缀的代码（600519.SH），调用方若只传 6 位裸代码，
-     * 先用原值查一次以兼容历史数据，未命中再补后缀重查。
+     * <p>裸 6 位代码按 A 股规则补后缀（{@link StockCodeUtil#resolve}）；无法识别的符号直接 400，
+     * 不再「原值查一次再补后缀查一次」——两段式符号是唯一身份，猜代码只会掩盖脏输入。
      */
     @GetMapping("/daily")
     public List<Map<String, Object>> getDailyData(@RequestParam("stockCode") String stockCode,
                                                   @RequestParam(value = "startDate", required = false) String startDate,
-                                                  @RequestParam(value = "endDate", required = false) String endDate) {
-        List<StockDailyData> dataList = queryDaily(stockCode, startDate, endDate);
-        if (dataList.isEmpty()) {
-            String suffixed = withSuffixIfBare(stockCode);
-            if (!suffixed.equals(stockCode)) {
-                dataList = queryDaily(suffixed, startDate, endDate);
-            }
-        }
-        return dataList.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
+                                                  @RequestParam(value = "endDate", required = false) String endDate,
+                                                  @RequestParam(value = "limit", required = false) Integer limit) {
+        String symbol = resolveSymbol(stockCode, HttpStatus.BAD_REQUEST);
+        Long fromTs = KlineQueryService.dayStartTs(normalizeDate(startDate));
+        Long toTs = KlineQueryService.dayEndExclusiveTs(normalizeDate(endDate));
+        List<Bar> bars = klineQueryService.query(symbol, KlineQueryRepository.PERIOD_DAILY,
+                fromTs, toTs, limit);
+        return bars.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
     }
 
-    private List<StockDailyData> queryDaily(String stockCode, String startDate, String endDate) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, stockCode);
-        if (startDate != null && !startDate.isEmpty()) {
-            wrapper.ge(StockDailyData::getTradeDate, startDate);
-        }
-        if (endDate != null && !endDate.isEmpty()) {
-            wrapper.le(StockDailyData::getTradeDate, endDate);
-        }
-        wrapper.orderByAsc(StockDailyData::getTradeDate);
-        return stockDailyDataMapper.selectList(wrapper);
+    /**
+     * 全历史收盘价缩略序列（LTTB 降采样到约 {@code points} 个点）。
+     *
+     * <p>供 K 线图底部的全貌条使用：主图只加载最近 620 根，这条序列负责
+     * 「让用户知道全历史长什么样、现在看的是哪一段」。约 4 KB。
+     */
+    @GetMapping("/daily/sparkline")
+    public List<Map<String, Object>> dailySparkline(@RequestParam("stockCode") String stockCode,
+                                                    @RequestParam(value = "points", defaultValue = "240") int points) {
+        String symbol = resolveSymbol(stockCode, HttpStatus.BAD_REQUEST);
+        int n = Math.min(Math.max(points, 20), 1000);
+        return klineQueryService.sparkline(symbol, n);
     }
 
     /**
      * 获取股票基础信息。
+     *
+     * <p>新增 {@code marketCode}（SH/SZ/BJ/US/CRYPTO，来自 {@code instrument.market}）；
+     * 旧的 {@code market}（Tushare 板块：主板/创业板…）原样保留，避免破坏调用方。
      */
     @GetMapping("/info")
     public Map<String, Object> getStockInfo(@RequestParam("stockCode") String stockCode) {
-        StockInfo info = stockInfoMapper.selectById(stockCode);
+        String symbol = resolveSymbol(stockCode, HttpStatus.BAD_REQUEST);
+        StockInfo info = stockInfoMapper.selectById(symbol);
         if (info == null) {
-            String suffixed = withSuffixIfBare(stockCode);
-            if (!suffixed.equals(stockCode)) {
-                info = stockInfoMapper.selectById(suffixed);
-            }
+            return new HashMap<>();
         }
-        return info != null ? toMap(info) : new HashMap<>();
+        Map<String, Object> map = toMap(info);
+        map.put("marketCode", marketCodeOf(symbol));
+        return map;
     }
 
     /**
@@ -108,35 +131,23 @@ public class StockDataController {
      */
     @GetMapping("/latest-price")
     public Map<String, Object> getLatestPrice(@RequestParam("stockCode") String stockCode) {
-        StockDailyData latest = queryLatest(stockCode);
-        if (latest == null) {
-            String suffixed = withSuffixIfBare(stockCode);
-            if (!suffixed.equals(stockCode)) {
-                latest = queryLatest(suffixed);
-            }
-        }
-
+        String symbol = resolveSymbol(stockCode, HttpStatus.BAD_REQUEST);
+        List<Bar> latest = barMapper.selectRecentDesc(symbol, KlineQueryRepository.PERIOD_DAILY, 1);
         Map<String, Object> result = new HashMap<>();
-        if (latest != null) {
-            result.put("stockCode", latest.getStockCode());
-            result.put("closePrice", latest.getClosePrice());
-            result.put("preClose", latest.getPreClose());
-            result.put("tradeDate", latest.getTradeDate());
+        if (!latest.isEmpty()) {
+            Bar bar = latest.get(0);
+            result.put("stockCode", bar.getInstrumentCode());
+            result.put("closePrice", bar.getClosePrice());
+            result.put("preClose", bar.getPreClose());
+            result.put("tradeDate", String.valueOf(KlineQueryService.tradeDateOf(bar.getTs())));
         }
         return result;
     }
 
-    private StockDailyData queryLatest(String stockCode) {
-        LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getStockCode, stockCode)
-                .orderByDesc(StockDailyData::getTradeDate)
-                .last("LIMIT 1");
-        return stockDailyDataMapper.selectOne(wrapper);
-    }
-
     /**
      * 批量获取股票最新行情，消除 N+1 查询。
-     * 一次 IN 查询所有代码的日线（按日期倒序），内存中每只代码取最新一条。
+     *
+     * <p>返回的 key 保持调用方传入的原值（可能是裸码），值里的 {@code stockCode} 是规范符号。
      */
     @GetMapping("/latest-prices")
     public Map<String, Map<String, Object>> getLatestPrices(@RequestParam("stockCodes") String stockCodes) {
@@ -146,26 +157,11 @@ public class StockDataController {
             return result;
         }
 
-        // 查询集合 = 原值 ∪ 归一化后缀值，一次 IN 查询
-        Map<String, String> queryToRaw = new HashMap<>();
-        Set<String> queryCodes = new LinkedHashSet<>();
-        for (String raw : rawCodes) {
-            queryCodes.add(raw);
-            String suffixed = StockCodeUtil.withSuffix(raw);
-            queryCodes.add(suffixed);
-            queryToRaw.putIfAbsent(suffixed, raw);
-        }
-
-        List<StockDailyData> rows = stockDailyDataMapper.selectList(
-                new LambdaQueryWrapper<StockDailyData>()
-                        .in(StockDailyData::getStockCode, queryCodes)
-                        .orderByDesc(StockDailyData::getTradeDate));
-        Set<String> matched = new HashSet<>();
-        for (StockDailyData row : rows) {
-            String raw = queryToRaw.getOrDefault(row.getStockCode(), row.getStockCode());
-            if (!matched.add(raw)) {
-                continue; // 已按日期倒序，每只代码第一条即最新
-            }
+        Map<String, String> symbolToRaw = mapSymbolToRaw(rawCodes);
+        List<Bar> rows = barMapper.selectLatestBatch(symbolToRaw.keySet(),
+                KlineQueryRepository.PERIOD_DAILY);
+        for (Bar row : rows) {
+            String raw = symbolToRaw.getOrDefault(row.getInstrumentCode(), row.getInstrumentCode());
             result.put(raw, toLatestMap(row));
         }
         return result;
@@ -182,23 +178,78 @@ public class StockDataController {
             return result;
         }
 
-        Map<String, String> queryToRaw = new HashMap<>();
-        Set<String> queryCodes = new LinkedHashSet<>();
-        for (String raw : rawCodes) {
-            queryCodes.add(raw);
-            String suffixed = StockCodeUtil.withSuffix(raw);
-            queryCodes.add(suffixed);
-            queryToRaw.putIfAbsent(suffixed, raw);
-        }
-
-        List<StockInfo> infos = stockInfoMapper.selectBatchIds(queryCodes);
-        Set<String> matched = new HashSet<>();
+        Map<String, String> symbolToRaw = mapSymbolToRaw(rawCodes);
+        List<StockInfo> infos = stockInfoMapper.selectBatchIds(symbolToRaw.keySet());
+        Set<String> symbols = new LinkedHashSet<>();
         for (StockInfo info : infos) {
-            String raw = queryToRaw.getOrDefault(info.getStockCode(), info.getStockCode());
-            if (!matched.add(raw)) {
-                continue;
+            symbols.add(info.getStockCode());
+        }
+        Map<String, String> marketCodes = marketCodesOf(symbols);
+
+        for (StockInfo info : infos) {
+            String raw = symbolToRaw.getOrDefault(info.getStockCode(), info.getStockCode());
+            Map<String, Object> map = toMap(info);
+            map.put("marketCode", marketCodes.get(info.getStockCode()));
+            result.put(raw, map);
+        }
+        return result;
+    }
+
+    // ---------------------------------------------------------------- 内部
+
+    /**
+     * 解析符号；无法解析时返回 400，而不是静默拿原值去查（查不到只会返回空列表，最难排查）。
+     */
+    private static String resolveSymbol(String raw, HttpStatus status) {
+        String symbol = StockCodeUtil.resolveOrNull(raw);
+        if (symbol == null) {
+            throw new ResponseStatusException(status,
+                    "非法的标的符号：" + raw + "；美股/加密必须带市场后缀（如 AAPL.US）");
+        }
+        return symbol;
+    }
+
+    /** 原值 → 规范符号，并保留反查表（响应 key 要用原值）。 */
+    private static Map<String, String> mapSymbolToRaw(List<String> rawCodes) {
+        Map<String, String> symbolToRaw = new LinkedHashMap<>();
+        for (String raw : rawCodes) {
+            String symbol = StockCodeUtil.resolveOrNull(raw);
+            if (symbol != null) {
+                symbolToRaw.putIfAbsent(symbol, raw);
             }
-            result.put(raw, toMap(info));
+        }
+        return symbolToRaw;
+    }
+
+    /** 日期入参统一成 yyyyMMdd；容忍 "2023-11-03"，其余格式 400。 */
+    private static String normalizeDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String s = raw.trim().replace("-", "");
+        if (s.length() != 8 || !s.chars().allMatch(Character::isDigit)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "日期格式应为 yyyyMMdd 或 yyyy-MM-dd: " + raw);
+        }
+        return s;
+    }
+
+    private String marketCodeOf(String symbol) {
+        Instrument instrument = instrumentMapper.selectById(symbol);
+        if (instrument != null && instrument.getMarket() != null) {
+            return instrument.getMarket();
+        }
+        // instrument 尚未覆盖该标的时，按符号后缀兜底（不猜市场）
+        return symbol.contains(".") ? symbol.substring(symbol.indexOf('.') + 1) : null;
+    }
+
+    private Map<String, String> marketCodesOf(Set<String> symbols) {
+        Map<String, String> result = new HashMap<>();
+        if (symbols.isEmpty()) {
+            return result;
+        }
+        for (Instrument instrument : instrumentMapper.selectBatchIds(symbols)) {
+            result.put(instrument.getCode(), instrument.getMarket());
         }
         return result;
     }
@@ -218,20 +269,13 @@ public class StockDataController {
         return result;
     }
 
-    private Map<String, Object> toLatestMap(StockDailyData latest) {
+    private Map<String, Object> toLatestMap(Bar latest) {
         Map<String, Object> map = new HashMap<>();
-        map.put("stockCode", latest.getStockCode());
+        map.put("stockCode", latest.getInstrumentCode());
         map.put("closePrice", latest.getClosePrice());
         map.put("preClose", latest.getPreClose());
-        map.put("tradeDate", latest.getTradeDate());
+        map.put("tradeDate", String.valueOf(KlineQueryService.tradeDateOf(latest.getTs())));
         return map;
-    }
-
-    /**
-     * 裸 6 位代码补全交易所后缀（统一走 StockCodeUtil，精确到前三位，含北交所 920xxx）。
-     */
-    private static String withSuffixIfBare(String code) {
-        return StockCodeUtil.withSuffix(code);
     }
 
     private Map<String, Object> toMap(StockInfo info) {
@@ -246,19 +290,42 @@ public class StockDataController {
         return map;
     }
 
-    private Map<String, Object> toMap(StockDailyData data) {
+    /**
+     * bar → 旧契约。
+     *
+     * <p>{@code changeAmount}/{@code pctChg} 不落库，由 {@code close − preClose} 现算；
+     * {@code preClose} 为空的历史行（除权信息缺失）这两个字段也留空，不编造。
+     */
+    private Map<String, Object> toMap(Bar bar) {
         Map<String, Object> map = new HashMap<>();
-        map.put("stockCode", data.getStockCode());
-        map.put("tradeDate", data.getTradeDate());
-        map.put("openPrice", data.getOpenPrice());
-        map.put("highPrice", data.getHighPrice());
-        map.put("lowPrice", data.getLowPrice());
-        map.put("closePrice", data.getClosePrice());
-        map.put("preClose", data.getPreClose());
-        map.put("changeAmount", data.getChangeAmount());
-        map.put("pctChg", data.getPctChg());
-        map.put("vol", data.getVol());
-        map.put("amount", data.getAmount());
+        map.put("stockCode", bar.getInstrumentCode());
+        map.put("tradeDate", String.valueOf(KlineQueryService.tradeDateOf(bar.getTs())));
+        map.put("openPrice", bar.getOpenPrice());
+        map.put("highPrice", bar.getHighPrice());
+        map.put("lowPrice", bar.getLowPrice());
+        map.put("closePrice", bar.getClosePrice());
+        map.put("preClose", bar.getPreClose());
+        map.put("changeAmount", changeAmount(bar));
+        map.put("pctChg", pctChg(bar));
+        map.put("vol", bar.getVolume());
+        map.put("amount", bar.getAmount());
         return map;
+    }
+
+    private static BigDecimal changeAmount(Bar bar) {
+        if (bar.getClosePrice() == null || bar.getPreClose() == null) {
+            return null;
+        }
+        return bar.getClosePrice().subtract(bar.getPreClose()).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal pctChg(Bar bar) {
+        if (bar.getClosePrice() == null || bar.getPreClose() == null
+                || bar.getPreClose().signum() == 0) {
+            return null;
+        }
+        return bar.getClosePrice().subtract(bar.getPreClose())
+                .multiply(BigDecimal.valueOf(100))
+                .divide(bar.getPreClose(), 4, RoundingMode.HALF_UP);
     }
 }

@@ -29,10 +29,15 @@ export function useTradeMarkers(candleSeries: Ref<ISeriesApi<'Candlestick'> | nu
   const toSeriesMarkers = (): SeriesMarker<Time>[] => {
     return [...markers.value].sort((a, b) => timeValue(a.time) - timeValue(b.time)).map(m => ({
       time: m.time,
+      // 买点标在下方、卖点标在上方，避免压住蜡烛实体
       position: m.direction === 'buy' ? 'belowBar' : 'aboveBar',
-      color: m.direction === 'buy' ? '#26a69a' : '#ef5350',
-      shape: m.direction === 'buy' ? 'arrowUp' : 'arrowDown',
-      text: m.direction === 'buy' ? '买' : '卖',
+      // A 股习惯：买用红、卖用绿
+      color: m.direction === 'buy' ? '#ef5350' : '#26a69a',
+      shape: 'circle',
+      text: m.direction === 'buy' ? 'B' : 'S',
+      // size 用默认值 1。之前调到 2 是为了对抗 MA 标签遮挡，但实测偏大、压住蜡烛实体，
+      // 用户反馈"红点太大"。遮挡问题改用下移位置解决，不靠放尺寸。
+      size: 1,
       id: m.id
     }))
   }
@@ -62,29 +67,68 @@ export function useTradeMarkers(candleSeries: Ref<ISeriesApi<'Candlestick'> | nu
     return marker
   }
 
-  const loadAutoMarkers = async (stockCode: string) => {
+  /**
+   * 加载历史成交自动标记。
+   *
+   * @param stockCode 股票代码
+   * @param barRange  当前已加载 K 线的日期范围（含）。窗口化之后必须传：
+   *                  marker 的 time 若不在 series 数据范围内，lightweight-charts
+   *                  会拒绝渲染甚至抛错，表现为「买卖点整片消失」。
+   *                  越界的标记会被暂存到 skippedCount，供上层提示「还有更早的成交」。
+   */
+  const loadAutoMarkers = async (
+    stockCode: string,
+    barRange?: { from: string; to: string }
+  ): Promise<{ loaded: number; skipped: number }> => {
     const version = ++loadVersion
     markers.value = markers.value.filter(m => m.source === 'manual')
     applyMarkers()
+    if (disposed || !stockCode) return { loaded: 0, skipped: 0 }
     try {
-      const userId = Number(localStorage.getItem('userId') || '0')
-      if (userId <= 0 || !stockCode) return
-      const res = await getTradeList({ userId, stockCode, pageNum: 1, pageSize: 200 })
-      if (disposed || version !== loadVersion || res.code !== 200 || !res.data) return
-      const autoMarkers: TradeMarker[] = res.data.map(t => ({
+      // userId 不需要前端传：TradeRecordController.list 会用 token 里的 userId
+      // 覆盖请求体中的值。原先这里用 localStorage.userId 做门槛，
+      // 一旦它缺失（换浏览器、清缓存、HMR 重载），标记就永远不加载且没有任何提示。
+      const res = await getTradeList({ stockCode, pageNum: 1, pageSize: 200 })
+      if (disposed || version !== loadVersion || res.code !== 200 || !res.data) {
+        return { loaded: 0, skipped: 0 }
+      }
+      const all: TradeMarker[] = res.data.map(t => ({
         id: `auto-${t.id}`,
         source: 'auto',
         direction: t.tradeType === 1 ? 'buy' : 'sell',
-        time: t.tradeDate.slice(0, 10),
+        time: String(t.tradeDate).slice(0, 10),
         price: t.tradePrice,
         quantity: t.tradeQuantity,
         editable: false
       }))
-      markers.value = markers.value.filter(m => m.source === 'manual').concat(autoMarkers)
+      const inRange = barRange
+        ? all.filter(m => {
+            const d = String(m.time)
+            return d >= barRange.from && d <= barRange.to
+          })
+        : all
+      markers.value = markers.value.filter(m => m.source === 'manual').concat(inRange)
       applyMarkers()
+      if (all.length === 0) {
+        console.info(`[买卖点] ${stockCode}: 无成交记录`)
+      } else {
+        console.info(
+          `[买卖点] ${stockCode}: 共 ${all.length} 条，窗口内显示 ${inRange.length} 条` +
+            (barRange ? `（窗口 ${barRange.from} ~ ${barRange.to}）` : ''),
+          inRange.map(m => `${m.direction === 'buy' ? 'B' : 'S'}@${m.time}`).join(' ')
+        )
+      }
+      return { loaded: inRange.length, skipped: all.length - inRange.length }
     } catch (e) {
       console.error('[useTradeMarkers] 加载交易标记失败:', e)
+      return { loaded: 0, skipped: 0 }
     }
+  }
+
+  /** 只清除自动标记，保留用户手动画的 */
+  const clearAutoMarkers = () => {
+    markers.value = markers.value.filter(m => m.source === 'manual')
+    applyMarkers()
   }
 
   const removeMarker = (id: string) => {
@@ -106,5 +150,5 @@ export function useTradeMarkers(candleSeries: Ref<ISeriesApi<'Candlestick'> | nu
     attachedSeries = null
   }
 
-  return { markers, addManualMarker, loadAutoMarkers, removeMarker, clearMarkers, applyMarkers, disposeMarkers }
+  return { markers, addManualMarker, loadAutoMarkers, clearAutoMarkers, removeMarker, clearMarkers, applyMarkers, disposeMarkers }
 }

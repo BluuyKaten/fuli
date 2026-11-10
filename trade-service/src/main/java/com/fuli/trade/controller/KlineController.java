@@ -1,6 +1,7 @@
 package com.fuli.trade.controller;
 
 import com.fuli.common.api.Result;
+import com.fuli.common.api.util.StockCodeUtil;
 import com.fuli.trade.dto.KlineBarDTO;
 import com.fuli.trade.entity.ChartDrawing;
 import com.fuli.trade.entity.RealtimeQuote;
@@ -37,9 +38,8 @@ public class KlineController {
     public Result<List<KlineBarDTO>> minute(
             @RequestParam String code,
             @RequestParam(defaultValue = "5") int period) {
-        // 去掉后缀
-        String pureCode = code.split("\\.")[0];
-        return Result.success(routerService.getMinuteData(pureCode, period));
+        // 东财要纯代码；解析只走 StockCodeUtil，不再本地 split
+        return Result.success(routerService.getMinuteData(StockCodeUtil.pureCode(code), period));
     }
 
     /**
@@ -47,8 +47,7 @@ public class KlineController {
      */
     @GetMapping("/weekly")
     public Result<List<KlineBarDTO>> weekly(@RequestParam String code) {
-        String pureCode = code.split("\\.")[0];
-        return Result.success(routerService.getWeeklyData(pureCode));
+        return Result.success(routerService.getWeeklyData(StockCodeUtil.pureCode(code)));
     }
 
     /**
@@ -56,8 +55,7 @@ public class KlineController {
      */
     @GetMapping("/monthly")
     public Result<List<KlineBarDTO>> monthly(@RequestParam String code) {
-        String pureCode = code.split("\\.")[0];
-        return Result.success(routerService.getMonthlyData(pureCode));
+        return Result.success(routerService.getMonthlyData(StockCodeUtil.pureCode(code)));
     }
 
     /**
@@ -69,7 +67,10 @@ public class KlineController {
      */
     @GetMapping("/quote")
     public Result<Map<String, Object>> quote(@RequestParam String code) {
-        String tushareCode = code.contains(".") ? code : code + getSuffix(code);
+        String tushareCode = StockCodeUtil.resolveOrNull(code);
+        if (tushareCode == null) {
+            return Result.error("非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
+        }
 
         RealtimeQuote quote = realtimeQuoteMapper.selectById(tushareCode);
         if (quote != null) {
@@ -193,11 +194,5 @@ public class KlineController {
             return Result.success(Map.of("data", "[]"));
         }
         return Result.success(Map.of("data", drawing.getDrawingData()));
-    }
-
-    private String getSuffix(String code) {
-        if (code.startsWith("6")) return ".SH";
-        if (code.startsWith("0") || code.startsWith("3")) return ".SZ";
-        return ".BJ";
     }
 }

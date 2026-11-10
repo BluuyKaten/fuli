@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS sys_user (
     avatar VARCHAR(255),
     cash DECIMAL(18,2) DEFAULT 0,
     status INT DEFAULT 1,
+    -- ADR-0010 决策 2：用户级 OKX 交易权限，默认关闭
+    okx_trade_enabled TINYINT NOT NULL DEFAULT 0,
     last_login_time TIMESTAMP,
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

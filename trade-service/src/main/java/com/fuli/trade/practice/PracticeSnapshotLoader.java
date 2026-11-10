@@ -1,6 +1,7 @@
 package com.fuli.trade.practice;
 
 import com.fuli.common.api.feign.DataFeignClient;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -16,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+@Slf4j
 @Component
 public class PracticeSnapshotLoader {
     public static final String DATA_ERROR = "所选区间行情无效或存在价格口径断层，请同步并核查未复权日线后重试";
@@ -55,7 +57,7 @@ public class PracticeSnapshotLoader {
         List<Map<String, Object>> rows;
         try {
             rows = data.getDailyData(input.stockCode(), from.format(DateTimeFormatter.BASIC_ISO_DATE),
-                    input.end().format(DateTimeFormatter.BASIC_ISO_DATE));
+                    input.end().format(DateTimeFormatter.BASIC_ISO_DATE), null);
         } catch (RuntimeException e) {
             // Upstream error text can contain future dates/prices; never forward it.
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "日线数据暂不可用，请先同步行情后重试");
@@ -100,8 +102,15 @@ public class PracticeSnapshotLoader {
                 }
                 if (!bars.isEmpty()) {
                     BigDecimal previous = bars.get(bars.size() - 1).close();
-                    if (preClose.subtract(previous).abs().compareTo(previous.multiply(new BigDecimal("0.005"))) > 0) {
+                    BigDecimal tolerance = previous.multiply(new BigDecimal("0.005"));
+                    BigDecimal deviation = preClose.subtract(previous);
+                    // 昨收高于前收盘在未复权口径下不可能出现，只可能是复权口径混用，仍判为断层。
+                    if (deviation.compareTo(tolerance) > 0) {
                         throw new IllegalArgumentException();
+                    }
+                    // 昨收低于前收盘多为除权除息／送转的除权参考价，属正常行情，放行并留痕。
+                    if (deviation.negate().compareTo(tolerance) > 0) {
+                        log.warn("除权除息缺口放行: {} {} preClose={} 前收盘={}", input.stockCode(), row.date(), preClose, previous);
                     }
                 }
                 bars.add(new PracticeState.FrozenBar(row.date().toString(), open, high, low, close, volume, preClose));

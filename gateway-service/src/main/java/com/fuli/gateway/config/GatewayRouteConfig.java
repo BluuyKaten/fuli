@@ -40,6 +40,22 @@ public class GatewayRouteConfig {
                 .route("data-service", r -> r.path("/api/data/**")
                         .filters(f -> f.stripPrefix(1))
                         .uri(environment.getProperty("fuli.routes.data", "lb://data-service")))
+                // 多市场 K 线统一契约（ADR-0007）。与 /api/data/** 分开，是为了让
+                // 「新契约」和「旧 Feign 端点」在路由层就能区分：迁完旧端点即可下线，不必翻 controller。
+                .route("market", r -> r.path("/api/market/**")
+                        .filters(f -> f.stripPrefix(1))
+                        .uri(environment.getProperty("fuli.routes.data", "lb://data-service")))
+                // MCP 端点预留（ADR-0009 决策 2/8）：server 尚未实现，但路由先纳管，
+                // 保证将来注册 Spring AI MCP server 时，请求必经 JwtGlobalFilter 校验，
+                // 不会以「默认未鉴权 JSON-RPC」的形态直接暴露。stripPrefix(1) 后落到 /okx/mcp/**，
+                // 与 data-service 的 OkxAuthPaths 保护清单一致。
+                .route("okx-mcp", r -> r.path("/api/okx/mcp/**")
+                        .filters(f -> f.stripPrefix(1))
+                        .uri(environment.getProperty("fuli.routes.data", "lb://data-service")))
+                // Agent 编排层（P9）：第 7 个模块，经网关纳入 JwtGlobalFilter
+                .route("ai-service", r -> r.path("/api/ai/**")
+                        .filters(f -> f.stripPrefix(1))
+                        .uri(environment.getProperty("fuli.routes.ai", "lb://ai-service")))
                 .build();
     }
 }

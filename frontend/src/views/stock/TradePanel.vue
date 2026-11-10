@@ -73,7 +73,6 @@ import { getAvailableQuantity } from '@/api/stock'
 import { createTrade } from '@/api/trade'
 import { getProfile } from '@/api/auth'
 import type { StockInfo } from '@/types'
-import { toPureCode, toTushareCode } from '@/utils/stockCode'
 import { calcTradeAmountFen, calcMaxBuyQuantity, fenToYuan } from '@/utils/money'
 
 const props = defineProps<{
@@ -120,9 +119,9 @@ const maxBuyQuantity = computed(() => {
 // 股票变化时更新表单
 watch(() => props.stock, async (s) => {
   if (s) {
-    form.stockCode = toPureCode(s.stockCode)
+    form.stockCode = s.stockCode
     form.stockName = s.stockName
-    await loadAvailableQuantity(toTushareCode(s.stockCode))
+    await loadAvailableQuantity(s.stockCode)
   }
 })
 
@@ -132,7 +131,7 @@ watch(() => props.price, (p) => {
 })
 
 watch(() => form.tradeType, async (t) => {
-  if (t === 2 && form.stockCode) await loadAvailableQuantity(toTushareCode(form.stockCode))
+  if (t === 2 && form.stockCode) await loadAvailableQuantity(form.stockCode)
 })
 
 const loadAvailableQuantity = async (stockCode: string) => {
@@ -142,7 +141,7 @@ const loadAvailableQuantity = async (stockCode: string) => {
   }
   if (!userId) return
   try {
-    const res = await getAvailableQuantity(userId, toTushareCode(stockCode))
+    const res = await getAvailableQuantity(userId, stockCode)
     if (res.code === 200 && res.data) {
       availableQuantity.value = res.data.availableQuantity || 0
     }
@@ -170,7 +169,7 @@ const handleSubmit = async () => {
   submitting.value = true
   try {
     const res = await createTrade({
-      stockCode: toTushareCode(form.stockCode),
+      stockCode: form.stockCode,
       stockName: form.stockName,
       tradeType: form.tradeType,
       tradePrice: form.tradePrice,
@@ -181,7 +180,7 @@ const handleSubmit = async () => {
     if (res.code === 200) {
       message.success(`${form.tradeType === 1 ? '买入' : '卖出'}成功`)
       emit('trade-success')
-      if (form.stockCode) await loadAvailableQuantity(toTushareCode(form.stockCode))
+      if (form.stockCode) await loadAvailableQuantity(form.stockCode)
     }
   } catch (e: any) {
     message.error(e.message || '交易失败')

@@ -16,10 +16,23 @@
 - 🔍 **全链路请求追踪**：traceId 贯穿网关与各服务日志
 - 🛡️ **服务熔断与优雅降级**：Resilience4j 熔断 + 超时，下游故障不拖垮调用方
 - ⚡ **分析缓存**：Caffeine 短 TTL 缓存聚合结果
+- 🪙 **OKX 行情与模拟盘交易**：V5 REST 行情同步、七模块受控端点、WebSocket 私有/公共频道、
+  独立订单表 + 写前日志（先落库再发网络）、`clOrdId` 幂等与 `tradeId` 对账
+- 🔐 **多用户 OKX 凭证隔离**：每人在「系统设置」录入自己的模拟盘 Key，AES-256-GCM 密文存库、
+  KEK 只在环境变量；服务按 JWT 的 userId 解密，代码里没有全局凭证
+- 🧾 **OKX 审计**：`[OKX-AUDIT]` 日志 + `okx_audit_log` 双写（保留 2 个月），按用户/标的/订单号可查
+- 🤖 **Agent 只读接入**：`ai-service` 用 client_credentials 服务令牌调受保护端点，
+  只能读、不能下单；下单建议落到 `okx_order_suggestion` 由人工决定
+- 🧰 **MCP 工具层**：Spring AI 暴露 9 个只读工具（零写工具），端点纳入同一套 JWT 鉴权
+- 🖥️ **OKX 账户设置页**（`/okx`）：录入/更新自己的模拟盘 Key（只回掩码）、查看凭证与总闸状态、
+  余额快照（WS `account` 频道落库）与 WS 连接状态
+- 🚦 **网关全局限流**：令牌桶限流，已认证按用户、登录/注册按 IP（防爆破），429 + `Retry-After`，fail-open
+- 🎯 **加密回测（阶段 2）**：Binance Vision / Gate 行情落 `bar`，Python 确定性回测引擎
+  （次根开盘撮合、滑点/费率参数化、净值/回撤/胜率/获利因子），`Strategy` 接口回测与实盘共用
 
 ## 技术栈
 
-- **后端**: Spring Boot 4.1 + Spring Cloud 2025.1 + MyBatis-Plus 3.5 + Resilience4j
+- **后端**: Spring Boot 4.1 + Spring Cloud 2025.1 + MyBatis-Plus 3.5 + Resilience4j + Spring AI 2.0（MCP Server）
 - **前端**: Vue 3 + Vite + TypeScript + Ant Design Vue + ECharts（manualChunks 拆包）
 - **数据库**: MySQL 8.0+
 - **缓存**: Redis（令牌黑名单）+ Caffeine（分析缓存）
@@ -39,6 +52,7 @@
 | `data-service` | 股票基础信息、历史行情查询与 Tushare 同步 | 必须 | 必须 | `8084` |
 | `trade-service` | 交易、持仓、K 线、自选股与历史练习 | 必须 | 必须 | `8082` |
 | `analysis-service` | 盈亏统计和资产分析 | 必须 | 必须 | `8083` |
+| `ai-service` | Agent 编排（规则版）+ OKX 只读服务令牌；用 OKX / MCP 时需要 | 按需 | 按需 | `8085` |
 | `gateway-service` | 前端 API 统一入口 | 必须 | 必须 | `8080` |
 | 前端 `frontend` | 浏览器页面 | 必须 | 必须 | `3000` |
 | AKTools / AKShare | 独立的 Python 行情 HTTP 服务 | 按需启动 | 按需启动 | 本文指定 `8090` |
@@ -153,7 +167,11 @@ npm ci
 | 2 | data（`8084`） | `mvn -pl data-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `DataApplication` |
 | 3 | trade（`8082`） | `mvn -pl trade-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `TradeApplication` |
 | 4 | analysis（`8083`） | `mvn -pl analysis-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `AnalysisApplication` |
-| 5 | gateway（`8080`） | `mvn -pl gateway-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `GatewayApplication` |
+| 5 | ai（`8085`，用 OKX 时） | `mvn -pl ai-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `AiServiceApplication` |
+| 6 | gateway（`8080`） | `mvn -pl gateway-service spring-boot:run "-Dspring-boot.run.profiles=local"` | `GatewayApplication` |
+
+> 仪表盘会同时调 `/api/trade/**` 与 `/api/analysis/**`：**trade-service（8082）和
+> analysis-service（8083）缺任一个，前端就会看到 503**（网关找不到可用实例时的固定回包）。
 
 IDE 中每个启动配置的 **Active profiles** 都填 `local`，或在 **Program arguments** 中填写 `--spring.profiles.active=local`。日志应出现 `The following 1 profile is active: "local"`。本地配置包含各服务一致的开发密钥，仅用于本机开发。
 
@@ -178,20 +196,25 @@ $env:TUSHARE_TOKEN = Read-Host '输入你的 Tushare Token'
 
 1. 若使用初始化脚本创建的 `admin` 账号，先以 `local` 启动 auth，登录后调用 `PUT /auth/password` 修改默认密码（请求头带 `Authorization: Bearer <登录返回的 token>`，JSON 请求体为 `{"oldPassword":"原密码","newPassword":"新的至少6位密码"}`）；当前账户页面没有改密入口。非 local 模式会拒绝带有已知默认管理员密码的数据库启动。
 2. 生成并保存一组随机密钥（JWT 至少 32 字符、内部密钥至少 16 字符），每个服务使用同一组；安装了 OpenSSL 时可分别运行 `openssl rand -base64 64` 和 `openssl rand -base64 24`。不要每启动一个服务就重新生成。
-3. 在每个后端终端中先设置以下配置，再执行后面的启动命令。`SPRING_APPLICATION_JSON` 显式映射内部密钥到 `fuli.internal-key`，并让所有服务的 Nacos 配置中心地址保持一致：
+3. 在每个后端终端中设置下面三个变量，再执行启动命令。`jwt.secret` 与 `fuli.internal-key`
+   已在各服务 `application.yml` 里显式映射到 `JWT_SECRET` / `INTERNAL_KEY`
+   （不再需要用 `SPRING_APPLICATION_JSON` 转一道）：
 
 ```powershell
 $env:NACOS_SERVER = '127.0.0.1:8848'
 $env:JWT_SECRET = Read-Host '输入已保存的共用 JWT 密钥'
 $env:INTERNAL_KEY = Read-Host '输入已保存的共用内部服务密钥'
-$env:SPRING_APPLICATION_JSON = @{
-    'jwt.secret' = $env:JWT_SECRET
-    'fuli.internal-key' = $env:INTERNAL_KEY
-    'spring.cloud.nacos.config.server-addr' = $env:NACOS_SERVER
-} | ConvertTo-Json -Compress
 ```
 
-数据库账号不同或需要同步行情时，还需设置 4A 中的 `DB_USERNAME`、`DB_PASSWORD`、`TUSHARE_TOKEN`。环境变量只对当前终端及它启动的进程生效；复制 [.env.example](.env.example) 为 `.env` **不会**让 `mvn spring-boot:run` 自动加载它，IDE 也需要配置相同的环境变量。
+数据库账号不同或需要同步行情时，还需设置 4A 中的 `DB_USERNAME`、`DB_PASSWORD`、`TUSHARE_TOKEN`。
+
+> **`.env` 现在会被自动加载**：各服务的 `application.yml` 里加了
+> `spring.config.import: optional:file:./.env[.properties]`（`./` 与 `../` 都试一遍），
+> 所以 `mvn spring-boot:run` 会直接读仓库根的 `.env`，文件不存在时静默跳过。
+> 优先级：**IDEA / 系统环境变量 > `.env` > yml 默认值**。
+> 两个注意点：① `.env` 必须是 **LF 换行**（CRLF 会让每个值多一个 `\r`，
+> `OKX_CRED_KEK` 会变成 33 字节而启动失败）；② 如果不同服务分别用 IDEA 和 `mvn` 启动，
+> 两边读到的 `JWT_SECRET` / `INTERNAL_KEY` 必须完全一致，否则会出现「令牌验不过」。
 
 在五个独立终端中按顺序执行，每个终端只运行一条启动命令：
 
@@ -204,13 +227,17 @@ mvn -pl data-service spring-boot:run
 mvn -pl trade-service spring-boot:run
 # 终端 4
 mvn -pl analysis-service spring-boot:run
-# 终端 5
+# 终端 5（用 OKX / MCP 时）
+mvn -pl ai-service spring-boot:run
+# 终端 6
 mvn -pl gateway-service spring-boot:run
 ```
 
-确认没有遗留的 `SPRING_PROFILES_ACTIVE=local` 或 IDE local 启动参数。默认读取 Nacos `DEFAULT_GROUP` 中各自的 `auth-service.yaml`、`data-service.yaml`、`trade-service.yaml`、`analysis-service.yaml`、`gateway-service.yaml`；导入为可选，未发布远程配置时保留仓库内配置，但服务注册与发现仍依赖 Nacos。可在注册服务列表中检查这五个服务是否正常上线。
+确认没有遗留的 `SPRING_PROFILES_ACTIVE=local` 或 IDE local 启动参数。默认读取 Nacos `DEFAULT_GROUP` 中各自的 `auth-service.yaml`、`data-service.yaml`、`trade-service.yaml`、`analysis-service.yaml`、`ai-service.yaml`、`gateway-service.yaml`；导入为可选，未发布远程配置时保留仓库内配置，但服务注册与发现仍依赖 Nacos。可在注册服务列表中检查这六个服务是否正常上线。
 
-从 Nacos 模式切回 4A 时，在相应终端执行 `Remove-Item Env:SPRING_APPLICATION_JSON -ErrorAction SilentlyContinue`，避免之前的密钥和地址覆盖本地配置。
+从 Nacos 模式切回 4A 时要注意：4A 的 local profile 用 `${JWT_SECRET:开发值}` 兜底，
+如果终端里还留着 4B 的 `JWT_SECRET` / `INTERNAL_KEY`，会优先用环境变量那一套。
+两套密钥混用会出现「令牌验不过」，保持同一套即可（推荐统一交给 `.env`）。
 
 ### 5. 启动前端、登录并准备行情
 
@@ -251,11 +278,11 @@ AKTools 0.0.91 的启动器未正确处理带空格的 Python 路径，出现 `'
 
 ### 7. 确认启动成功、常见问题与停止方式
 
-完整功能启动后应监听 `3306`、`8080`～`8084`、`3000`；Nacos 模式另有 `8848/9848`。可选的 Redis、AKTools 分别使用 `6379`、`8090`。Windows 可检查：
+完整功能启动后应监听 `3306`、`8080`～`8085`、`3000`；Nacos 模式另有 `8848/9848`。可选的 Redis、AKTools 分别使用 `6379`、`8090`。Windows 可检查：
 
 ```powershell
 Get-NetTCPConnection -State Listen |
-    Where-Object { $_.LocalPort -in 3306,6379,8848,9848,8080,8081,8082,8083,8084,3000,8090 } |
+    Where-Object { $_.LocalPort -in 3306,6379,8848,9848,8080,8081,8082,8083,8084,8085,3000,8090 } |
     Select-Object LocalAddress,LocalPort,OwningProcess
 ```
 
@@ -273,6 +300,111 @@ docker compose stop mysql redis nacos
 ```
 
 只停止需要停止的服务即可；手工启动的 Nacos 在其 `bin` 目录执行 `.\shutdown.cmd`，本机 MySQL 则从“服务”管理器停止。下次日常启动只需依次启动基础设施、五个后端和前端；无需重新建库、安装依赖或重新生成密钥。
+
+## OKX 模拟盘接入（可选）
+
+系统只接 **OKX 模拟盘**：实盘凭证不进 Java 服务，`OkxConfig.isSimulated()` 是常量，
+所有私有请求恒定携带 `x-simulated-trading: 1`，提币永不开启。需要实盘成交时由人在 OKX 侧操作，
+系统最多产出「下单建议单」。
+
+### 需要的环境变量
+
+| 变量 | 必填 | 说明 |
+| --- | --- | --- |
+| `JWT_SECRET` | 是 | 与网关/auth 一致，OKX 端点靠它验签 |
+| `OKX_CRED_KEK` | **是** | 32 字节凭证加密主密钥（`openssl rand -base64 32`）；缺失时 data-service **启动失败** |
+| `INTERNAL_KEY` | 是 | 服务间共享密钥：查用户交易权限、写建议单 |
+| `OKX_PROXY` | 国内必需 | 如 `127.0.0.1:7897`（Clash 混合口，带不带 `http://` 都认） |
+| `AI_SERVICE_CLIENT_SECRET` | 用 Agent 时 | auth-service 与 ai-service 两侧同值 |
+| `OKX_AGENT_OWNER_USER_ID` / `OKX_WS_OWNER_USER_ID` / `OKX_MCP_OWNER_USER_ID` | 可选 | 服务账号/WS/MCP 用哪个 userId 的凭证；0 或不配 = 明确报错，不会借用别人账户 |
+| `OKX_TRADE_ENABLED` | 下单时 | `true` 才开全局总闸（默认 false） |
+| `OKX_WS_ENABLED` | 看实时行情时 | `true` 才连 WS（默认 false） |
+| `OKX_WS_URL` | 同上 | 公共 `wss://wspap.okx.com/ws/v5/public`；私有 `/ws/v5/private` |
+| `OKX_WS_SUBSCRIPTIONS` | 同上 | 逗号分隔，如 `tickers:BTC-USDT` 或 `account,positions:SWAP,orders:ANY` |
+
+> **OKX 的 API Key / Secret / Passphrase 不放环境变量**。它们在「系统设置 → OKX 账户」里
+> 按用户录入，AES-256-GCM 密文存 `data_db.okx_account`；旧的 `OKX_API_KEY` 等变量已删除。
+
+### 四道闸（缺一不可）
+
+1. 有效 JWT；
+2. `sys_user.okx_trade_enabled = 1`（用户级，默认 0）；
+3. `okx.trade-enabled = true`（全局总闸，默认 false）；
+4. 该用户已录入 `enabled=1` 的模拟盘凭证。
+
+读接口只需要第 1 条；同步/下单/撤单要 1+2+3+4。
+
+### 上手步骤
+
+1. **登录拿令牌**（`admin` 是初始化脚本账号，密码见 `sql/auth_db.sql` 注释）：
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}' http://127.0.0.1:8080/api/auth/login
+```
+
+   页面入口：登录后左侧「**OKX 账户**」（`http://localhost:3000/okx`），
+   可录入/更新 Key、看凭证与总闸状态、看余额快照与 WS 状态。
+
+2. **录入模拟盘 Key**（只需有效令牌，不需要交易权限）：
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"label":"模拟盘-主账户","apiKey":"...","secretKey":"...","passphrase":"..."}' \
+  http://127.0.0.1:8080/api/data/okx/account
+```
+
+响应只回 `apiKeyMasked`（如 `abcd****wxyz`），永远不会回 secret / passphrase。
+
+3. **授权交易**（一次 SQL，默认拒绝所有人）：
+
+```sql
+UPDATE auth_db.sys_user SET okx_trade_enabled = 1 WHERE id = 3;   -- 换成要交易的账号 id
+```
+
+生效有 30 秒缓存；要立即阻断就撤销令牌。
+
+4. **确认链路**：
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/data/okx/status
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"instId":"BTC-USDT"}' http://127.0.0.1:8080/api/data/okx/capability/market_ticker
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/data/okx/trade/balance
+```
+
+5. **开总闸后下最小单**：在 data-service 的环境变量里加 `OKX_TRADE_ENABLED=true` 并重启，
+再用 `POST /api/data/okx/trade/order`（`sz` 从小开始，如 `0.00001`）。
+
+### 常见返回
+
+| 返回 | 含义 | 处理 |
+| --- | --- | --- |
+| `401` | 无令牌/令牌过期 | 重新登录 |
+| `403` + `未被授予 OKX 交易权限` | `okx_trade_enabled=0` | 执行第 3 步 SQL，等 30 秒 |
+| `400` + `OKX 下单已关闭` | 全局总闸没开 | 设 `OKX_TRADE_ENABLED=true` 并重启 data-service |
+| `400` + `尚未配置可用的 OKX 模拟盘凭证` | 该用户没录 Key | 走第 2 步 |
+| `400` + `服务账号读取账户数据需要代理身份` | Agent 读私有数据但没配 `OKX_AGENT_OWNER_USER_ID` | 配上并重启 data-service |
+
+### 实时行情与余额快照
+
+```bash
+# WS 是否连上、最近有没有收到帧（真机联调用它，比翻日志可靠）
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/data/okx/ws/status
+
+# 最新余额（每个币种一条 + TOTAL），数据来源是 WS account 频道
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/api/data/okx/snapshots/latest
+```
+
+- 公共行情（`tickers`/`candle*`/`books*`）**不需要 Key**：把 `OKX_WS_URL` 指到 `/ws/v5/public`、
+  订阅写成 `tickers:BTC-USDT` 就能看到实时推送。
+- 私有频道（`account`/`positions`/`orders`）需要模拟盘 Key，并且 `OKX_WS_OWNER_USER_ID`
+  指向该 Key 所属用户；登录成功后才会有余额快照。
+- `okx_audit_log` 已改为**按月 RANGE 分区**，清理用 `DROP PARTITION`（秒级），
+  每日 03:10 自动补齐未来 3 个月分区并丢弃 2 个月前的分区。
+
+详细配置、限频、WS 与故障排查见 [OKX 接入手册](docs/okx-接入手册.md)，
+前端字段契约见 [OKX 前端契约](docs/okx-前端契约.md)。
 
 ## 验证
 
@@ -312,7 +444,8 @@ fuli/
 ├── auth-service/        # 认证服务 (8081)
 ├── trade-service/       # 交易服务 (8082)
 ├── analysis-service/    # 分析服务 (8083)
-├── data-service/        # 数据同步 (8084)
+├── data-service/        # 数据同步 + OKX 接入 (8084)
+├── ai-service/          # Agent 编排 (8085)
 ├── frontend/            # 前端 (3000)
 └── sql/                 # 数据库脚本
 ```

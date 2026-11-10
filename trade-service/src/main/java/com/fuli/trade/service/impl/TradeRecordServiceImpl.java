@@ -612,11 +612,11 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         String date = tradeDate.format(DateTimeFormatter.BASIC_ISO_DATE);
         Map<String, Object> row = queryTradeDay(stockCode, date);
         if (row == null && !stockCode.contains(".")) {
-            String withSuffix = StockCodeUtil.withSuffix(stockCode);
-            if (!withSuffix.equals(stockCode)) {
-                row = queryTradeDay(withSuffix, date);
+            String resolved = StockCodeUtil.resolveOrNull(stockCode);
+            if (resolved != null && !resolved.equals(stockCode)) {
+                row = queryTradeDay(resolved, date);
                 if (row != null) {
-                    log.debug("裸代码 {} 补全为 {} 后命中行情", stockCode, withSuffix);
+                    log.debug("裸代码 {} 补全为 {} 后命中行情", stockCode, resolved);
                 }
             }
         }
@@ -625,7 +625,7 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
 
     private Map<String, Object> queryTradeDay(String stockCode, String date) {
         try {
-            List<Map<String, Object>> rows = dataFeignClient.getDailyData(stockCode, date, date);
+            List<Map<String, Object>> rows = dataFeignClient.getDailyData(stockCode, date, date, null);
             if (rows != null) {
                 for (Map<String, Object> row : rows) {
                     if (row != null && date.equals(String.valueOf(row.get("tradeDate")))) {

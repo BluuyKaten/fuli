@@ -149,9 +149,11 @@ public class AnalysisService {
         for (String stockCode : stockCodes) {
             Map<LocalDate, BigDecimal> dailyPrices = new HashMap<>();
             try {
-                // 通过 data-service 获取日线数据
+                // 通过 data-service 获取日线数据。
+                // 第 4 个参数 limit 传 null：这里要的是 firstTradeDate~endDateActual 的整段区间，
+                // 截断会让后续的持仓估值缺日。与练习模块同理，见 KlineQueryService.query 的注释。
                 List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode,
-                        firstTradeDate.format(fmt), endDateActual.format(fmt));
+                        firstTradeDate.format(fmt), endDateActual.format(fmt), null);
                 if (result != null) {
                     for (Map<String, Object> item : result) {
                         String tradeDateStr = (String) item.get("tradeDate");

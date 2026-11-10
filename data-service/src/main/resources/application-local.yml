@@ -6,6 +6,14 @@ spring:
       discovery:
         enabled: false
 
+# Redis 只是日线 L2 缓存，不可用时 DailyKlineCache 会自动降级为直接查库
+# （已实测：Redis 关闭时接口仍返回 200 和正确的 620 根，日志记录「降级查库」）。
+# 一个可选依赖不该让整个服务在 health 上显示 DOWN。
+management:
+  health:
+    redis:
+      enabled: false
+
 # 本地开发 Profile（data-service）
 # 使用方式：spring.profiles.active=local
 #
@@ -14,11 +22,27 @@ spring:
 
 jwt:
   # 本地开发 JWT 密钥（>= 32 字节），与 auth-service 保持一致
-  secret: dev-only-jwt-secret-key-please-replace-in-production-0123456789
+  secret: ${JWT_SECRET:dev-only-jwt-secret-key-please-replace-in-production-0123456789}
 
 fuli:
   # 本地开发用随机密钥（>= 16 字节），请勿用于生产。
-  internal-key: dev-only-internal-key-0123456789
+  internal-key: ${INTERNAL_KEY:dev-only-internal-key-0123456789}
+
+# OKX 端点鉴权（ADR-0009 决策 8 / ADR-0010 决策 2）。
+# jwt-secret 与上面的 jwt.secret 必须一致，否则网关签发的令牌在 data-service 验不过。
+# 写权限不再有白名单：权限来自 auth_db.sys_user.okx_trade_enabled，
+# 本地调试时需要先执行
+#   UPDATE auth_db.sys_user SET okx_trade_enabled = 1 WHERE id = <你的用户ID>;
+okx:
+  auth:
+    jwt-secret: ${JWT_SECRET:dev-only-jwt-secret-key-please-replace-in-production-0123456789}
+    # 与 auth-service 的 fuli.internal-key 一致（本地值见下）
+    internal-key: ${INTERNAL_KEY:dev-only-internal-key-0123456789}
+    permission-base-url: ${AUTH_SERVICE_URL:http://127.0.0.1:8081}
+  # 本地凭证加密密钥（恰好 32 字节）。生产必须用 `openssl rand -base64 32` 生成并注入 OKX_CRED_KEK。
+  # 换掉这个值会导致已录入的凭证解不开（属于预期行为，重新录入即可）。
+  credential:
+    kek: ${OKX_CRED_KEK:dev-only-okx-credential-kek-32b!}
 
 # 本地开发保留 SQL 日志；生产环境使用默认 slf4j 实现（不打印 SQL）。
 mybatis-plus:

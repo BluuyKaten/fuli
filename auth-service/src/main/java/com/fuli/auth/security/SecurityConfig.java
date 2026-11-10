@@ -32,6 +32,8 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/login", "/auth/register", "/auth/captcha").permitAll()
+                        // 服务账号令牌（client_credentials）：本身不带 Bearer，由客户端密钥认证
+                        .requestMatchers("/auth/oauth/token").permitAll()
                         .requestMatchers("/auth/internal/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .anyRequest().authenticated()

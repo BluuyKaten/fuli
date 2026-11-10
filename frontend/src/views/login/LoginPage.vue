@@ -101,7 +101,8 @@ const loading = ref(false)
 const isRegister = ref(false)
 
 const formState = reactive({
-  username: '',
+  // 记住上次登录的用户名：令牌过期后重新登录只需补密码，不用重敲账号
+  username: localStorage.getItem('lastUsername') || '',
   password: '',
   confirmPassword: ''
 })
@@ -135,6 +136,8 @@ const onFinish = async (values: { username: string; password: string }) => {
       const res = await loginApi(values)
       if (res.code === 200) {
         userStore.setToken(res.data.token, res.data.username, res.data.nickname ?? null, res.data.userId, res.data.cash)
+        // 记住用户名：令牌过期后重新登录只需补密码（密码永不落本地）
+        localStorage.setItem('lastUsername', values.username)
         message.success('登录成功')
         router.push('/dashboard')
       }

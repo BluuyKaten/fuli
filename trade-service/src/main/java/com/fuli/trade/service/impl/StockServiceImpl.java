@@ -1,6 +1,7 @@
 package com.fuli.trade.service.impl;
 
 import com.fuli.common.api.feign.DataFeignClient;
+import com.fuli.common.api.util.StockCodeUtil;
 import com.fuli.trade.entity.PositionSummary;
 import com.fuli.trade.entity.TradeRecord;
 import com.fuli.trade.mapper.PositionSummaryMapper;
@@ -14,6 +15,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Slf4j
@@ -44,12 +46,24 @@ public class StockServiceImpl implements StockService {
     }
 
     @Override
-    public List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate) {
+    public List<Map<String, Object>> getDailyData(String stockCode, String startDate, String endDate, Integer limit) {
         try {
-            List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode, startDate, endDate);
+            List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode, startDate, endDate, limit);
             return result != null ? result : new java.util.ArrayList<>();
         } catch (Exception e) {
             log.warn("获取日线失败，降级返回空: stockCode={}, error={}", stockCode, e.getMessage());
+            return new java.util.ArrayList<>();
+        }
+    }
+
+    @Override
+    public List<Map<String, Object>> getDailySparkline(String stockCode, int points) {
+        try {
+            List<Map<String, Object>> result = dataFeignClient.getDailySparkline(stockCode, points);
+            return result != null ? result : new java.util.ArrayList<>();
+        } catch (Exception e) {
+            // 缩略条只是辅助信息，拿不到就不显示，不应影响主图
+            log.warn("获取缩略序列失败，降级返回空: stockCode={}, error={}", stockCode, e.getMessage());
             return new java.util.ArrayList<>();
         }
     }
@@ -128,9 +142,12 @@ public class StockServiceImpl implements StockService {
         Map<String, Object> result = new HashMap<>();
 
         // 1. 获取股票信息，判断市场类型
+        // marketCode 来自 instrument.market（data-service 新增字段）；market 仍是 Tushare 板块，
+        // 只用于展示，不能用来判断交易规则——「主板/创业板」不是交易所。
         Map<String, Object> stockInfo = getStockInfo(stockCode);
         String market = stockInfo.get("market") != null ? stockInfo.get("market").toString() : "";
-        boolean isAStock = isAStock(market, stockCode);
+        String marketCode = stockInfo.get("marketCode") != null ? stockInfo.get("marketCode").toString() : "";
+        boolean isAStock = isAStock(marketCode, stockCode);
 
         // 2. 获取总持仓数量
         int totalQuantity = getHoldingQuantity(userId, stockCode);
@@ -159,19 +176,22 @@ public class StockServiceImpl implements StockService {
     }
 
     /**
-     * 判断是否为A股
-     * A股代码特征：
-     * - 上海：60xxxx.SH、68xxxx.SH（科创板）
-     * - 深圳：00xxxx.SZ、30xxxx.SZ（创业板）
-     * - 北京：8xxxxx.BJ、43xxxx.BJ
+     * 判断是否为 A 股（决定 T+1 冻结）。
+     *
+     * <p>先读 {@code instrument.market}（data-service 的 {@code marketCode}）；
+     * 缺失时按符号后缀兜底。**不再用六位数字正则**——那套规则会把 {@code AAPL} 当成 A 股，
+     * 接入美股后直接导致 T+0 标的被错误冻结。
      */
-    private boolean isAStock(String market, String stockCode) {
-        if (market != null && !market.isEmpty()) {
-            return "SH".equalsIgnoreCase(market) || "SZ".equalsIgnoreCase(market) || "BJ".equalsIgnoreCase(market);
+    private boolean isAStock(String marketCode, String stockCode) {
+        if (marketCode != null && !marketCode.isBlank()) {
+            return StockCodeUtil.isAShareMarket(marketCode.trim().toUpperCase(Locale.ROOT));
         }
-        // 兜底：6 位数字代码（可带 .SH/.SZ/.BJ 后缀）视为 A 股。
-        // 本项目仅支持 A 股日线，未知代码按 T+1 处理，避免前端展示出可当日卖出的错误数量。
-        return stockCode == null || stockCode.matches("\\d{6}(\\.(?i)(SH|SZ|BJ))?");
+        try {
+            return StockCodeUtil.isAShareMarket(StockCodeUtil.marketOf(stockCode));
+        } catch (IllegalArgumentException e) {
+            // 无法判定就当非 A 股：宁可走 T+0 的通用路径，也不能凭空冻结可卖数量
+            return false;
+        }
     }
 
     /**

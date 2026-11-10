@@ -1,9 +1,12 @@
 package com.fuli.data.init;
 
-import com.fuli.data.entity.StockDailyData;
+import com.fuli.data.entity.Bar;
+import com.fuli.data.entity.Instrument;
 import com.fuli.data.entity.StockInfo;
-import com.fuli.data.mapper.StockDailyDataMapper;
+import com.fuli.data.mapper.BarMapper;
+import com.fuli.data.mapper.InstrumentMapper;
 import com.fuli.data.mapper.StockInfoMapper;
+import com.fuli.data.repository.KlineQueryRepository;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Profile;
@@ -12,7 +15,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -27,15 +30,20 @@ import java.util.Random;
 @Profile("local")
 public class StockDataInitializer implements ApplicationRunner {
 
-    private final StockDailyDataMapper stockDailyDataMapper;
+    private final BarMapper barMapper;
+    private final InstrumentMapper instrumentMapper;
     private final StockInfoMapper stockInfoMapper;
 
-    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final LocalDate START_DATE = LocalDate.of(2026, 6, 1);
     private static final LocalDate END_DATE = LocalDate.now();
 
-    public StockDataInitializer(StockDailyDataMapper stockDailyDataMapper, StockInfoMapper stockInfoMapper) {
-        this.stockDailyDataMapper = stockDailyDataMapper;
+    /** 种子行情的时区，与生产 A 股口径一致（交易日 09:30 CST 开盘）。 */
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
+
+    public StockDataInitializer(BarMapper barMapper, InstrumentMapper instrumentMapper,
+                                StockInfoMapper stockInfoMapper) {
+        this.barMapper = barMapper;
+        this.instrumentMapper = instrumentMapper;
         this.stockInfoMapper = stockInfoMapper;
     }
 
@@ -57,7 +65,27 @@ public class StockDataInitializer implements ApplicationRunner {
         stocks.add(createStock("000858.SZ", "五粮液", "四川", "白酒", "19980427", "SZ"));
         for (StockInfo stock : stocks) {
             stockInfoMapper.insert(stock);
+            instrumentMapper.upsert(toInstrument(stock));
         }
+    }
+
+    /**
+     * 种子标的也要进 instrument：新代码的 {@code /market/bars} 与 {@code marketCode}
+     * 都以 instrument 为准，缺了它本地环境会 404。
+     */
+    private Instrument toInstrument(StockInfo stock) {
+        Instrument instrument = new Instrument();
+        instrument.setCode(stock.getStockCode());
+        instrument.setMarket(stock.getMarket());
+        instrument.setName(stock.getStockName());
+        instrument.setCurrency("CNY");
+        instrument.setPriceScale(2);
+        instrument.setLotSize(new BigDecimal("100"));
+        instrument.setTickSize(new BigDecimal("0.01"));
+        instrument.setTz("Asia/Shanghai");
+        instrument.setSession("DAY");
+        instrument.setStatus(1);
+        return instrument;
     }
 
     private StockInfo createStock(String code, String name, String area, String industry, String listDate, String market) {
@@ -74,10 +102,7 @@ public class StockDataInitializer implements ApplicationRunner {
 
     private void initStockDailyData() {
         String sampleStock = "000001.SZ";
-        long count = stockDailyDataMapper.selectCount(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockDailyData>()
-                        .eq(StockDailyData::getStockCode, sampleStock)
-        );
+        long count = barMapper.countBySymbol(sampleStock, KlineQueryRepository.PERIOD_DAILY);
         if (count > 10) {
             return;
         }
@@ -92,7 +117,7 @@ public class StockDataInitializer implements ApplicationRunner {
         };
 
         Random random = new Random(42);
-        List<StockDailyData> allData = new ArrayList<>();
+        List<Bar> allData = new ArrayList<>();
 
         for (int s = 0; s < stockCodes.length; s++) {
             String stockCode = stockCodes[s];
@@ -115,19 +140,21 @@ public class StockDataInitializer implements ApplicationRunner {
                             .subtract(BigDecimal.valueOf(random.nextDouble() * 0.03)))
                             .setScale(2, RoundingMode.HALF_UP);
 
-                    StockDailyData data = new StockDailyData();
-                    data.setStockCode(stockCode);
-                    data.setTradeDate(date.format(DATE_FORMAT));
-                    data.setOpenPrice(open);
-                    data.setHighPrice(high);
-                    data.setLowPrice(low);
-                    data.setClosePrice(close);
-                    data.setPreClose(lastClose);
-                    data.setChangeAmount(close.subtract(lastClose).setScale(2, RoundingMode.HALF_UP));
-                    data.setPctChg(changeRate.multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP));
-                    data.setVol(BigDecimal.valueOf(500000 + random.nextInt(2000000)));
-                    data.setAmount(close.multiply(BigDecimal.valueOf(100000)).setScale(2, RoundingMode.HALF_UP));
-                    allData.add(data);
+                    Bar bar = new Bar();
+                    bar.setInstrumentCode(stockCode);
+                    bar.setPeriod(KlineQueryRepository.PERIOD_DAILY);
+                    // 种子数据直接按 bar 口径写入：交易日 09:30 CST = 01:30 UTC
+                    bar.setTs(date.atStartOfDay(SHANGHAI).toEpochSecond() + 9 * 3600 + 30 * 60);
+                    bar.setOpenPrice(open);
+                    bar.setHighPrice(high);
+                    bar.setLowPrice(low);
+                    bar.setClosePrice(close);
+                    bar.setPreClose(lastClose);
+                    // 成交量按「股」写（生产口径），成交额按「元」写
+                    bar.setVolume(BigDecimal.valueOf((500000 + random.nextInt(2000000)) * 100L));
+                    bar.setAmount(close.multiply(BigDecimal.valueOf(100000))
+                            .multiply(BigDecimal.valueOf(1000)).setScale(2, RoundingMode.HALF_UP));
+                    allData.add(bar);
 
                     lastClose = close;
                 }
@@ -135,8 +162,8 @@ public class StockDataInitializer implements ApplicationRunner {
             }
         }
 
-        for (StockDailyData data : allData) {
-            stockDailyDataMapper.insert(data);
+        for (Bar bar : allData) {
+            barMapper.upsert(bar);
         }
     }
 }

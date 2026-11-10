@@ -2,6 +2,7 @@ package com.fuli.trade.datasource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fuli.common.api.util.StockCodeUtil;
 import com.fuli.trade.dto.KlineBarDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,8 +25,17 @@ import java.util.List;
 @Component
 public class EastMoneyDataSource implements StockDataSource {
 
+    /**
+     * 单次请求超时。
+     *
+     * <p>实测上游响应在 249–1013 ms 之间抖动（3 倍），3 秒足以覆盖正常波动，
+     * 又不至于让用户对着空白图干等。只设 connectTimeout 是不够的——
+     * 连接能建上但服务端不返回时，请求会一直挂到 10 秒的连接超时上限。
+     */
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
+
     private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
+            .connectTimeout(Duration.ofSeconds(3))
             .build();
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -34,13 +44,22 @@ public class EastMoneyDataSource implements StockDataSource {
     private boolean enabled;
 
     /**
-     * 市场前缀：1=上海，0=深圳
+     * 东财 {@code secid} 的市场前缀。
+     *
+     * <p>这是<b>适配器内部协议</b>，不是标的身份规则：市场判断统一走
+     * {@link StockCodeUtil#marketOf}（裸 6 位按 A 股推断），这里只负责把市场映射成数字前缀。
+     *
+     * <p>⚠️ 东财对北交所目前用 {@code 0} 前缀（与深市同号），这是既有实现，<b>不要擅自改成 1</b>；
+     * 阶段 1 接入美股时在部署环境实测校准。
      */
     private String getMarketPrefix(String stockCode) {
-        if (stockCode.startsWith("6")) return "1";
-        if (stockCode.startsWith("0") || stockCode.startsWith("3")) return "0";
-        if (stockCode.startsWith("4") || stockCode.startsWith("8")) return "0";
-        return "1";
+        String market = StockCodeUtil.marketOf(stockCode);
+        return switch (market) {
+            case "SH" -> "1";
+            case "SZ", "BJ" -> "0";   // BJ：东财现状用 0
+            case "US" -> "105";       // 阶段 1 按 instrument.exchange 选 105(NASDAQ)/106(NYSE)
+            default -> throw new IllegalArgumentException("东财暂不支持的市场: " + market);
+        };
     }
 
     /**
@@ -61,6 +80,7 @@ public class EastMoneyDataSource implements StockDataSource {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("User-Agent", "Mozilla/5.0")
+                    .timeout(REQUEST_TIMEOUT)
                     .GET()
                     .build();
 
@@ -120,6 +140,7 @@ public class EastMoneyDataSource implements StockDataSource {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("User-Agent", "Mozilla/5.0")
+                    .timeout(REQUEST_TIMEOUT)
                     .GET()
                     .build();
 

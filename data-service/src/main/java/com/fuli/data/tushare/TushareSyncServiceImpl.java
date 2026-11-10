@@ -1,21 +1,32 @@
 package com.fuli.data.tushare;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fuli.data.cache.DailyKlineCache;
+import com.fuli.data.entity.Bar;
+import com.fuli.data.entity.Instrument;
 import com.fuli.data.entity.StockDailyData;
 import com.fuli.data.entity.StockInfo;
+import com.fuli.data.mapper.BarMapper;
+import com.fuli.data.mapper.InstrumentMapper;
 import com.fuli.data.mapper.StockDailyDataMapper;
 import com.fuli.data.mapper.StockInfoMapper;
+import com.fuli.data.repository.KlineQueryRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -24,6 +35,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class TushareSyncServiceImpl implements TushareSyncService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    /** A 股交易日所属时区；日线时间轴按它换算成 UTC 秒。 */
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
 
     /**
      * 单个交易日数据量阈值(含):若数据库中该交易日数据 >= 此值,视为已同步过,跳过
@@ -39,6 +53,9 @@ public class TushareSyncServiceImpl implements TushareSyncService {
     private final TushareClient tushareClient;
     private final StockInfoMapper stockInfoMapper;
     private final StockDailyDataMapper stockDailyDataMapper;
+    private final BarMapper barMapper;
+    private final InstrumentMapper instrumentMapper;
+    private final DailyKlineCache klineCache;
     private final SyncProgressManager progressManager;
     private final ThreadPoolTaskScheduler syncTaskScheduler;
 
@@ -48,11 +65,17 @@ public class TushareSyncServiceImpl implements TushareSyncService {
     public TushareSyncServiceImpl(TushareClient tushareClient,
                                   StockInfoMapper stockInfoMapper,
                                   StockDailyDataMapper stockDailyDataMapper,
+                                  BarMapper barMapper,
+                                  InstrumentMapper instrumentMapper,
+                                  DailyKlineCache klineCache,
                                   SyncProgressManager progressManager,
                                   ThreadPoolTaskScheduler syncTaskScheduler) {
         this.tushareClient = tushareClient;
         this.stockInfoMapper = stockInfoMapper;
         this.stockDailyDataMapper = stockDailyDataMapper;
+        this.barMapper = barMapper;
+        this.instrumentMapper = instrumentMapper;
+        this.klineCache = klineCache;
         this.progressManager = progressManager;
         this.syncTaskScheduler = syncTaskScheduler;
     }
@@ -102,7 +125,10 @@ public class TushareSyncServiceImpl implements TushareSyncService {
             }
         }
 
-        log.info("股票基础信息同步完成, 共 {} 条", count);
+        // instrument 接管名称/状态刷新（ADR-0006）：stock_info 退化为 A 股扩展表，
+        // 但板块/地域等字段仍留在那边，这里只同步身份与状态。
+        int instruments = instrumentMapper.upsertFromStockInfo();
+        log.info("股票基础信息同步完成, 共 {} 条; instrument 刷新 {} 条", count, instruments);
         return count;
     }
 
@@ -141,15 +167,17 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         List<List<Object>> items = response.getData().getItems();
 
         int count = 0;
+        Set<String> touched = new LinkedHashSet<>();
         for (List<Object> item : items) {
             try {
                 StockDailyData dailyData = parseDailyData(fieldNames, item);
-                upsertDailyData(dailyData);
+                upsertDailyData(dailyData, touched);
                 count++;
             } catch (Exception e) {
                 log.warn("保存日线数据失败: {}", item, e);
             }
         }
+        evictAfterCommit(touched);
 
         log.info("日线数据同步完成: {}, 共 {} 条", tsCode, count);
         return count;
@@ -173,15 +201,17 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         List<List<Object>> items = response.getData().getItems();
 
         int count = 0;
+        Set<String> touched = new LinkedHashSet<>();
         for (List<Object> item : items) {
             try {
                 StockDailyData dailyData = parseDailyData(fieldNames, item);
-                upsertDailyData(dailyData);
+                upsertDailyData(dailyData, touched);
                 count++;
             } catch (Exception e) {
                 log.warn("保存日线数据失败: {}", item, e);
             }
         }
+        evictAfterCommit(touched);
 
         log.info("按交易日期同步日线数据完成: {}, 共 {} 条", tradeDate, count);
         return count;
@@ -469,7 +499,7 @@ public class TushareSyncServiceImpl implements TushareSyncService {
      */
     private boolean isTradeDateAlreadySynced(String tradeDate) {
         LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDailyData::getTradeDate, tradeDate);
+        wrapper.eq(StockDailyData::getTradeDate, Integer.valueOf(tradeDate.replace("-", "")));
         Long count = stockDailyDataMapper.selectCount(wrapper);
         return count != null && count >= SKIP_THRESHOLD;
     }
@@ -494,15 +524,18 @@ public class TushareSyncServiceImpl implements TushareSyncService {
 
         List<String> fieldNames = response.getData().getFields();
         int count = 0;
+        Set<String> touched = new LinkedHashSet<>();
         for (List<Object> item : items) {
             try {
                 StockDailyData dailyData = parseDailyData(fieldNames, item);
-                upsertDailyData(dailyData);
+                upsertDailyData(dailyData, touched);
                 count++;
             } catch (Exception e) {
                 log.warn("保存日线数据失败: {}", item, e);
             }
         }
+        // 该方法由后台线程逐日调用、无外层事务，数据已自动提交，直接失效即可
+        evictAfterCommit(touched);
 
         return count;
     }
@@ -555,15 +588,17 @@ public class TushareSyncServiceImpl implements TushareSyncService {
                     && response.getData().getItems() != null && !response.getData().getItems().isEmpty()) {
                 log.info("获取到 {} 的数据,共 {} 条", tryDateStr, response.getData().getItems().size());
                 int count = 0;
+                Set<String> touched = new LinkedHashSet<>();
                 for (List<Object> item : response.getData().getItems()) {
                     try {
                         StockDailyData dailyData = parseDailyData(response.getData().getFields(), item);
-                        upsertDailyData(dailyData);
+                        upsertDailyData(dailyData, touched);
                         count++;
                     } catch (Exception e) {
                         log.warn("保存日线数据失败: {}", item, e);
                     }
                 }
+                evictAfterCommit(touched);
                 return count;
             }
             tryDate = tryDate.minusDays(1);
@@ -578,14 +613,16 @@ public class TushareSyncServiceImpl implements TushareSyncService {
                 .orderByDesc(StockDailyData::getTradeDate)
                 .last("LIMIT 1");
         StockDailyData latest = stockDailyDataMapper.selectOne(wrapper);
-        return latest != null ? latest.getTradeDate() : null;
+        return latest != null && latest.getTradeDate() != null
+                ? String.valueOf(latest.getTradeDate()) : null;
     }
 
     private String getGlobalLatestTradeDate() {
         LambdaQueryWrapper<StockDailyData> wrapper = new LambdaQueryWrapper<>();
         wrapper.orderByDesc(StockDailyData::getTradeDate).last("LIMIT 1");
         StockDailyData latest = stockDailyDataMapper.selectOne(wrapper);
-        return latest != null ? latest.getTradeDate() : null;
+        return latest != null && latest.getTradeDate() != null
+                ? String.valueOf(latest.getTradeDate()) : null;
     }
 
     private Map<String, Object> createParams(String tsCode, String startDate, String endDate) {
@@ -610,7 +647,7 @@ public class TushareSyncServiceImpl implements TushareSyncService {
             if (value == null) continue;
             switch (field) {
                 case "ts_code" -> dailyData.setStockCode(value.toString());
-                case "trade_date" -> dailyData.setTradeDate(value.toString());
+                case "trade_date" -> dailyData.setTradeDate(Integer.valueOf(value.toString().replace("-", "")));
                 case "open" -> dailyData.setOpenPrice(new BigDecimal(value.toString()));
                 case "high" -> dailyData.setHighPrice(new BigDecimal(value.toString()));
                 case "low" -> dailyData.setLowPrice(new BigDecimal(value.toString()));
@@ -629,8 +666,84 @@ public class TushareSyncServiceImpl implements TushareSyncService {
         stockInfoMapper.upsert(stockInfo);
     }
 
-    private void upsertDailyData(StockDailyData dailyData) {
+    /**
+     * 写一根日线：{@code bar}（正向换算）+ 旧表 {@code stock_daily_data}（原样，过渡期双写）。
+     *
+     * <p>双写是回滚靶子：任何时刻回滚到旧代码，旧表仍是最新，图表不断档（ADR-0007）。
+     * 观察期两周后删掉这一行反向兼容，就只剩 {@code bar}。
+     */
+    private void upsertDailyData(StockDailyData dailyData, Set<String> touched) {
+        barMapper.upsert(toBar(dailyData));
         stockDailyDataMapper.upsert(dailyData);
+        if (dailyData.getStockCode() != null) {
+            touched.add(dailyData.getStockCode());
+        }
+    }
+
+    /**
+     * Tushare 原始行 → {@code bar}。<b>这是全项目唯一的日线单位换算落点。</b>
+     *
+     * <ul>
+     *   <li>{@code amount} 千元 → 元：<b>× 1000</b></li>
+     *   <li>{@code vol} 手 → 股：<b>× 100</b></li>
+     *   <li>{@code pre_close} 原样搬运，不换算、不丢弃</li>
+     * </ul>
+     *
+     * <p>⚠️ 历史迁移脚本 {@code V7__migrate_a_share_bars.sql} 用的是同一组系数。
+     * 两处必须永远一致——一旦分成两套，历史与新数据会差 1000/100 倍，
+     * 均线、指标、成交额全部失真，而且不报错。验收只看 {@code SUM} 精确对账。
+     */
+    static Bar toBar(StockDailyData d) {
+        Bar bar = new Bar();
+        bar.setInstrumentCode(d.getStockCode());
+        bar.setPeriod(KlineQueryRepository.PERIOD_DAILY);
+        bar.setTs(tradeDateToTs(d.getTradeDate()));
+        bar.setOpenPrice(d.getOpenPrice());
+        bar.setHighPrice(d.getHighPrice());
+        bar.setLowPrice(d.getLowPrice());
+        bar.setClosePrice(d.getClosePrice());
+        bar.setPreClose(d.getPreClose());
+        bar.setVolume(d.getVol() == null ? null : d.getVol().multiply(BigDecimal.valueOf(100)));
+        bar.setAmount(d.getAmount() == null ? null : d.getAmount().multiply(BigDecimal.valueOf(1000)));
+        return bar;
+    }
+
+    /**
+     * 交易日 {@code yyyyMMdd} → 当日 09:30 CST 的 UNIX 秒（= 01:30 UTC）。
+     *
+     * <p>用 {@link LocalDate#atStartOfDay(ZoneId)} 换算，不依赖数据库会话时区；
+     * 迁移脚本里那个 {@code UNIX_TIMESTAMP(...) - 28800} 只有把会话时区固定成 UTC 才等价。
+     */
+    static Long tradeDateToTs(Integer tradeDate) {
+        if (tradeDate == null) {
+            return null;
+        }
+        LocalDate date = LocalDate.parse(String.valueOf(tradeDate), DateTimeFormatter.BASIC_ISO_DATE);
+        return date.atStartOfDay(SHANGHAI).toEpochSecond() + 9 * 3600 + 30 * 60;
+    }
+
+    /**
+     * 事务提交后再失效缓存。
+     *
+     * <p>提交前失效等于没失效：并发请求会把仍然可见的旧数据重新灌回缓存，
+     * 之后要等 TTL 才纠正。没有事务时（后台逐日同步线程）数据已自动提交，直接失效。
+     */
+    private void evictAfterCommit(Set<String> symbols) {
+        if (symbols == null || symbols.isEmpty()) {
+            return;
+        }
+        Set<String> copy = Set.copyOf(symbols);
+        Runnable task = () -> klineCache.evictAll(copy, KlineQueryRepository.PERIOD_DAILY);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
     }
 
     /** 每分钟请求限速器（进程内），避免超过 Tushare 接口频率限制。 */

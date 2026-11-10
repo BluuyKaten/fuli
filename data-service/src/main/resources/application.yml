@@ -1,6 +1,27 @@
 spring:
+  # 本地开发从仓库根的 .env 读取环境变量（Spring Boot 默认不读 .env）。
+  # optional: 文件不存在时静默跳过，因此生产环境不受影响。
+  # 注意：.env 必须是 LF 换行，否则每个值都会带上 \r（OKX_CRED_KEK 会因此变成 33 字节而启动失败）。
+  config:
+    import:
+      - optional:file:./.env[.properties]
+      - optional:file:../.env[.properties]
   application:
     name: data-service
+  # P5：Java 侧 MCP Server（Spring AI 2.0.1）。端点落 /okx/mcp，已在 OkxAuthPaths 保护清单内。
+  # 若属性名随版本变化而回落到默认 /mcp，该路径同样被保护，不会裸奔。
+  ai:
+    mcp:
+      server:
+        enabled: true
+        name: fuli-okx
+        version: 1.0.0
+        type: SYNC
+        protocol: STATELESS
+        stateless:
+          mcp-endpoint: /okx/mcp
+        annotation-scanner:
+          enabled: true
   cloud:
     nacos:
       config:
@@ -12,11 +33,24 @@ spring:
 server:
   port: 8084
 
+spring.web.error:
+  # 业务错误要把原因回给调用方（前端要显示「交易开关没开」这类具体原因），
+  # 但**绝不能带堆栈**：devtools 会把 include-stacktrace 默认改成 always，
+  # 那样 403/400 的响应体里会泄露内部类名与行号。
+  # 注意：Boot 4 把 server.error.* 迁到了 spring.web.error.*，写旧位置会被静默忽略。
+  include-message: always
+  include-stacktrace: never
+
 spring.datasource:
   driver-class-name: com.mysql.cj.jdbc.Driver
   url: jdbc:mysql://127.0.0.1:3306/data_db?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
   username: ${DB_USERNAME:root}
   password: ${DB_PASSWORD:123456}
+
+# 日线 K 线 L2 缓存（ADR-0004）。Redis 不可用时缓存层自动降级为直接查库，不影响可用性。
+spring.data.redis:
+  host: ${REDIS_HOST:127.0.0.1}
+  port: ${REDIS_PORT:6379}
 
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
@@ -26,6 +60,71 @@ mybatis-plus:
 tushare:
   token: ${TUSHARE_TOKEN:}
   api-url: https://api.tushare.pro
+
+# OKX 接入（ADR-0008 / ADR-0009 / ADR-0010）。
+# 凭证不在配置里：每个用户把自己的模拟盘 Key 录入 data_db.okx_account（密文），
+# 服务按当前 JWT 的 userId 解密使用；不存在 OKX_API_KEY 这类全局凭证，也没有回退路径。
+# 模拟盘是系统常量（ADR-0009 决策 4）：不提供 OKX_SIMULATED 开关，所有私有请求
+# 恒定携带 x-simulated-trading: 1，实盘凭证不进本服务。沿用旧配置 OKX_SIMULATED=false 会启动失败。
+okx:
+  base-url: https://www.okx.com
+  timeout-ms: 10000
+  # 国内网络直连不通时填 http://127.0.0.1:7897 之类；空=直连
+  proxy: ${OKX_PROXY:}
+  quote-ccy: USDT
+  symbols: BTC-USDT,ETH-USDT,SOL-USDT
+  bars: 1d
+  auto-sync: false
+  # 全局总闸。用户级开关是 sys_user.okx_trade_enabled，两者都开才允许写。
+  # 可用环境变量 OKX_TRADE_ENABLED=true 打开，不必改文件（改完需重启）。
+  trade-enabled: ${OKX_TRADE_ENABLED:false}
+  max-order-size: "0"
+  # WS 私有频道的账户身份（userId）。0=不登录私有频道，只跑公共行情。
+  ws-owner-user-id: ${OKX_WS_OWNER_USER_ID:0}
+  # MCP 私有工具（余额/持仓/挂单）的账户身份。0=这些工具返回「未配置身份」。
+  mcp-owner-user-id: ${OKX_MCP_OWNER_USER_ID:0}
+  # 服务账号（ai-service）读取私有数据时代表的账户身份。0=服务令牌读私有端点返回 400。
+  # 这是「身份选择」，凭证仍只来自该用户的 okx_account 密文；写操作永远不走这条。
+  agent-owner-user-id: ${OKX_AGENT_OWNER_USER_ID:0}
+  # 凭证加密（ADR-0010 决策 1）。KEK 只从环境变量来，缺失时启动失败。
+  # 推荐生成方式：openssl rand -base64 32
+  credential:
+    kek: ${OKX_CRED_KEK:}
+    key-version: 1
+  # 鉴权（ADR-0009 决策 8 / ADR-0010 决策 2）。
+  # JWT_SECRET 必须与 gateway-service / auth-service 完全一致；未注入时 /data/okx/** 一律 503。
+  auth:
+    jwt-secret: ${JWT_SECRET:}
+    # 用户级交易权限的权威数据在 auth_db.sys_user.okx_trade_enabled，由 auth-service 提供内部接口
+    permission-base-url: ${AUTH_SERVICE_URL:http://127.0.0.1:8081}
+    # 必须与 auth-service 的 fuli.internal-key（INTERNAL_KEY）一致；为空时写操作一律拒绝
+    internal-key: ${INTERNAL_KEY:}
+    # 权限缓存秒数；0=不缓存。收回权限最迟延迟这么久生效。
+    permission-cache-seconds: 30
+    # 服务令牌受众，必须与 auth-service 签发时写入的 aud 一致（禁止 token passthrough）
+    service-token-audience: fuli-data
+  # 审计保留策略（ADR-0010 决策 3 / V13 分区）：
+  #   03:10 补/丢分区（分区表优先，DROP PARTITION 秒级）
+  #   03:30 分批 DELETE（仅在未分区时兜底）
+  #   03:45 清理 90 天前的余额快照
+  audit:
+    cleanup-cron: ${OKX_AUDIT_CLEANUP_CRON:0 30 3 * * *}
+    partition-cron: ${OKX_AUDIT_PARTITION_CRON:0 10 3 * * *}
+    snapshot-cleanup-cron: ${OKX_ACCOUNT_CLEANUP_CRON:0 45 3 * * *}
+  # WebSocket（实施计划 P3）。默认关闭，起服务不主动连交易所。
+  # URL 被 OkxWsProperties.validate() 强制限制在模拟盘域 wspap.okx.com；填实盘域会启动失败。
+  ws:
+    # 默认关：起服务不主动连交易所。真机联调时设 OKX_WS_ENABLED=true。
+    enabled: ${OKX_WS_ENABLED:false}
+    # 公共行情用 /ws/v5/public（无需登录）；私有频道用 /ws/v5/private（需要 okx.ws-owner-user-id）。
+    url: ${OKX_WS_URL:wss://wspap.okx.com/ws/v5/private}
+    reconnect-delay-ms: 2000
+    max-reconnect-delay-ms: 60000
+    heartbeat-seconds: 20
+    buffer-capacity: 10000
+    # 逗号分隔。第二段含义：account→ccy、orders/positions→instType、其余公共频道→instId。
+    # 例：account,positions:SWAP,orders:ANY  或  tickers:BTC-USDT,candle1m:BTC-USDT
+    subscriptions: ${OKX_WS_SUBSCRIPTIONS:account,positions:SWAP,orders:ANY}
 
 logging:
   pattern:

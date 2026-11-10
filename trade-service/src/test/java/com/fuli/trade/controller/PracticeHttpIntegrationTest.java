@@ -47,7 +47,7 @@ class PracticeHttpIntegrationTest {
         mvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(context.getBeansOfType(Filter.class).values().toArray(Filter[]::new)).build();
         jdbc.update("DELETE FROM practice_session");
-        when(market.getDailyData(anyString(), nullable(String.class), nullable(String.class)))
+        when(market.getDailyData(anyString(), nullable(String.class), nullable(String.class), nullable(Integer.class)))
                 .thenReturn(prices());
     }
 
@@ -90,7 +90,7 @@ class PracticeHttpIntegrationTest {
         var pending = order(initial, "BUY", 100);
         assertKnownPrefix(pending, "2026-01-05");
         assertFalse(pending.getJSONObject("pendingOrder").containsKey("price"));
-        when(market.getDailyData(anyString(), nullable(String.class), nullable(String.class)))
+        when(market.getDailyData(anyString(), nullable(String.class), nullable(String.class), nullable(Integer.class)))
                 .thenThrow(new IllegalStateException("market must never be queried after creation"));
         var next = mutate(pending, "advance");
         assertKnownPrefix(next, "2026-01-06");
@@ -99,7 +99,7 @@ class PracticeHttpIntegrationTest {
         assertEquals(next.getJSONArray("bars"), restored.getJSONArray("bars"));
         assertEquals(next.getJSONArray("fills"), restored.getJSONArray("fills"));
         assertEquals(next.getLongValue("version"), restored.getLongValue("version"));
-        verify(market, times(1)).getDailyData(anyString(), nullable(String.class), nullable(String.class));
+        verify(market, times(1)).getDailyData(anyString(), nullable(String.class), nullable(String.class), nullable(Integer.class));
         String persisted = jdbc.queryForObject("SELECT snapshot_json FROM practice_session WHERE id=?", String.class, next.getString("id"));
         assertNotNull(persisted);
         assertTrue(persisted.contains("2026-01-08"));
@@ -221,7 +221,7 @@ class PracticeHttpIntegrationTest {
     void invalidOrDiscontinuousFutureSampleIsRejectedWithoutEchoingFutureValues() throws Exception {
         var invalid = prices();
         invalid.get(2).put("preClose", new BigDecimal("99.8765"));
-        when(market.getDailyData(anyString(), nullable(String.class), nullable(String.class))).thenReturn(invalid);
+        when(market.getDailyData(anyString(), nullable(String.class), nullable(String.class), nullable(Integer.class))).thenReturn(invalid);
         var result = mvc.perform(post(BASE).header("Authorization", bearer(1)).contentType("application/json").content(createBody()))
                 .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertFalse(result.contains("99.8765"));

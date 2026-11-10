@@ -49,3 +49,13 @@ frontend/.browser-smoke/
 
 ### 助手工作记忆（不提交） ###
 .workbuddy/
+
+### 调试响应快照（含登录 token 等敏感信息，禁止提交） ###
+/adv.json
+/fin.json
+/p.json
+/tl.json
+/login.json
+
+### 数据库迁移的本地备份产物（环境相关，禁止提交） ###
+sql/migrations/backup/

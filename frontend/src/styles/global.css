@@ -628,3 +628,30 @@ body::before {
     color: #27ae60 !important;
   }
 }
+
+/* ============================================================
+ * 浏览器自动填充（:-webkit-autofill）覆盖
+ *
+ * Chrome/Edge 的密码管理器会把手填过的输入框强制刷成白/浅黄底，
+ * 在深色主题里非常刺眼（登录页最明显）。这个底色由 UA 样式注入，
+ * 普通 background 覆盖无效，只能用足够大的 inset box-shadow 盖住，
+ * 再用 -webkit-text-fill-color 改字色。
+ * ============================================================ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--term-panel-bg) inset !important;
+  box-shadow: 0 0 0 1000px var(--term-panel-bg) inset !important;
+  -webkit-text-fill-color: var(--term-fg) !important;
+  caret-color: var(--term-fg);
+  /* 让 UA 的底色过渡被无限拉长，视觉上等同于立刻变暗 */
+  transition: background-color 9999s ease-out 0s;
+}
+
+/* 浏览器自带的「密码已保存」图标在深色底上偏灰，稍微提亮 */
+input::-webkit-credentials-auto-fill-button {
+  opacity: 0.65;
+}

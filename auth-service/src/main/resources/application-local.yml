@@ -19,14 +19,30 @@ spring:
 
 jwt:
   # 本地开发用随机密钥（>= 32 字节），请勿用于生产。
-  secret: dev-only-jwt-secret-key-please-replace-in-production-0123456789
+  secret: ${JWT_SECRET:dev-only-jwt-secret-key-please-replace-in-production-0123456789}
 
 fuli:
-  internal-key: dev-only-internal-key-0123456789
+  internal-key: ${INTERNAL_KEY:dev-only-internal-key-0123456789}
   # 本地开发允许高敏感内部操作（如 resetCash），生产环境必须置为 false
   allow-dangerous-operations: true
+  # 服务账号（ADR-0010 决策 4）。本地用固定弱密钥仅为联调方便，
+  # 生产必须注入 AI_SERVICE_CLIENT_SECRET，且与 ai-service 侧一致。
+  agent:
+    clients:
+      ai-service:
+        secret: ${AI_SERVICE_CLIENT_SECRET:dev-only-ai-service-client-secret-0123456789}
+        scopes: orders:read
+        enabled: true
 
 # 本地开发保留 SQL 日志；生产环境使用默认 slf4j 实现（不打印 SQL）。
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+# 本地不跑 Redis 时，actuator 的 redis 健康探针会把整体状态报成 DOWN，
+# 而 auth-service 代码里从未使用 RedisTemplate（仅 application.yml 保留了连接配置）。
+# 关掉该探针，避免 `/actuator/health` 的 503 被误读成服务不可用。
+management:
+  health:
+    redis:
+      enabled: false

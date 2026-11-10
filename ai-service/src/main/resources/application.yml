@@ -1,0 +1,44 @@
+server:
+  port: 8085
+
+spring:
+  # 本地开发从仓库根的 .env 读取环境变量（Spring Boot 默认不读 .env）。
+  # optional: 文件不存在时静默跳过，因此生产环境不受影响。
+  # 注意：.env 必须是 LF 换行，否则每个值都会带上 \r（OKX_CRED_KEK 会因此变成 33 字节而启动失败）。
+  config:
+    import:
+      - optional:file:./.env[.properties]
+      - optional:file:../.env[.properties]
+  application:
+    name: ai-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER:127.0.0.1:8848}
+      config:
+        server-addr: ${NACOS_SERVER:127.0.0.1:8848}
+
+# ai-service 的两条出站链路：
+#   1) 公共行情  /market/bars         —— 无需鉴权
+#   2) 受保护只读 /data/okx/trade/**  —— 用**自己的服务令牌**（client_credentials，scope=orders:read）
+# 从不转发用户的 JWT：那是 token passthrough，MCP 规范禁止，也等于把用户权限借给后台进程。
+fuli:
+  data-service-url: ${DATA_SERVICE_URL:http://127.0.0.1:8084}
+  ai:
+    # 用户令牌验签密钥，必须与 auth-service / gateway / data-service 一致。
+    # 缺失时 /ai/** 一律 503（fail-closed），/ai/health 仍可探活。
+    jwt-secret: ${JWT_SECRET:}
+    # 服务账号：在 auth-service 的 fuli.agent.clients 里登记过才有效
+    client-id: ${AI_SERVICE_CLIENT_ID:ai-service}
+    client-secret: ${AI_SERVICE_CLIENT_SECRET:}
+    auth-service-url: ${AUTH_SERVICE_URL:http://127.0.0.1:8081}
+    # 令牌有效期 15 分钟，这里每 10 分钟刷新一次
+    token-refresh-ms: 600000
+    # 写建议单用的内部密钥，与 auth-service 的 fuli.internal-key（INTERNAL_KEY）一致
+    internal-key: ${INTERNAL_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

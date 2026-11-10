@@ -47,7 +47,12 @@ vi.mock('@/composables/useIndicators', () => ({ useIndicators: () => ({
   activeIndicators: {}, updateIndicators: vi.fn(), saveIndicators: vi.fn(), clearAllIndicators: vi.fn()
 }) }))
 vi.mock('@/composables/useTradeMarkers', () => ({ useTradeMarkers: () => ({
-  loadAutoMarkers: vi.fn(), addManualMarker: mocks.addMarker, disposeMarkers: mocks.detachMarkers
+  // 组件会解构 markers 做缩略条买卖点投影（sparkMarkers）、解构 clearAutoMarkers 切标的时清自动标记。
+  // mock 的返回契约必须和 composable 的真实 return 保持一致，少一个就会在渲染期
+  // 抛 "Cannot read properties of undefined (reading 'value')"，9 个用例一起红。
+  markers: shallowRef([]),
+  loadAutoMarkers: vi.fn(), clearAutoMarkers: vi.fn(),
+  addManualMarker: mocks.addMarker, disposeMarkers: mocks.detachMarkers
 }) }))
 vi.mock('@/composables/useChartExport', () => ({ useChartExport: () => ({
   exporting: false, exportPNG: vi.fn(), exportCSV: vi.fn()
@@ -140,7 +145,9 @@ beforeEach(async () => {
   })
   vi.stubGlobal('cancelAnimationFrame', (id: number) => mocks.frames.delete(id))
   root = new TestNode('root')
-  app = renderer.createApp(LightweightChart, { stockCode: '600519' })
+  // 阶段 0 起 stockCode 一律是「代码.市场」的完整符号：
+  // 前端不再做后缀推断（toTushareCode 已删），裸码传进来也推不出市场。
+  app = renderer.createApp(LightweightChart, { stockCode: '600519.SH' })
   app.mount(root)
   await nextTick()
   flushFrames()

@@ -26,11 +26,26 @@ public interface DataFeignClient {
 
     /**
      * 获取股票日线行情。
+     *
+     * <p>区间与 limit 的语义：
+     * <ul>
+     *   <li>传了 startDate 或 endDate：按区间返回，{@code limit} 不生效（练习模块依赖完整区间做连续性校验）</li>
+     *   <li>都没传：返回最近 {@code limit} 根，{@code limit} 为空时退回 620 根（500 视窗 + 120 指标前置）</li>
+     * </ul>
+     * 见 docs/adr/0002-kline-windowed-loading.md。
      */
     @GetMapping("/data/stock/daily")
     List<Map<String, Object>> getDailyData(@RequestParam("stockCode") String stockCode,
                                            @RequestParam(value = "startDate", required = false) String startDate,
-                                           @RequestParam(value = "endDate", required = false) String endDate);
+                                           @RequestParam(value = "endDate", required = false) String endDate,
+                                           @RequestParam(value = "limit", required = false) Integer limit);
+
+    /**
+     * 全历史收盘价缩略序列（服务端已 LTTB 降采样）。供 K 线图底部全貌条使用。
+     */
+    @GetMapping("/data/stock/daily/sparkline")
+    List<Map<String, Object>> getDailySparkline(@RequestParam("stockCode") String stockCode,
+                                                @RequestParam(value = "points", defaultValue = "240") int points);
 
     /**
      * 获取股票基础信息。

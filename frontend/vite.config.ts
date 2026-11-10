@@ -31,6 +31,18 @@ export default defineConfig({
       }
     }
   },
+  // 生产包本地预览：`npm run build && npm run preview`。
+  // 与 dev 一样把 /api 代理到网关，避免预览时接口 404。
+  preview: {
+    port: 3000,
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true
+      }
+    }
+  },
   build: {
     // 把体积大且改动频率低的三方库拆成独立 chunk，利于浏览器长效缓存，
     // 也避免它们被全部打进入口 index.js。

@@ -39,6 +39,15 @@ public class User implements Serializable {
 
     private Integer status;
 
+    /**
+     * OKX 交易权限（ADR-0010 决策 2）：0-禁止（默认） 1-允许。
+     *
+     * <p>这是用户级开关，取代了原来的 {@code OKX_WRITE_USER_IDS} 环境变量白名单。
+     * 它只是「允许写」的必要条件之一：还需要 {@code okx.trade-enabled=true} 这个全局总闸，
+     * 以及本人在 data_db.okx_account 里录了凭证。
+     */
+    private Integer okxTradeEnabled;
+
     private LocalDateTime lastLoginTime;
 
     @TableField(fill = FieldFill.INSERT)

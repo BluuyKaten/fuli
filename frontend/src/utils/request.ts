@@ -58,6 +58,9 @@ request.interceptors.response.use(
         notifyError('没有权限访问')
       } else if (status === 404) {
         notifyError('请求的资源不存在')
+      } else if (status === 503) {
+        // 网关在「服务没注册上/没启动」时统一回 503，比「服务器内部错误」更好排障
+        notifyError('服务暂不可用：对应的后端可能未启动')
       } else if (status >= 500) {
         notifyError('服务器内部错误，请稍后重试')
       } else {

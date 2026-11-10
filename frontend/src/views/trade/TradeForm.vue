@@ -47,7 +47,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import { createTrade, type TradeRecord } from '@/api/trade'
-import { toTushareCode } from '@/utils/stockCode'
 
 const route = useRoute()
 const router = useRouter()
@@ -92,7 +91,7 @@ const onSubmit = async () => {
   await formRef.value.validate()
   const data: Partial<TradeRecord> = {
     ...formState,
-    stockCode: toTushareCode(formState.stockCode),
+    stockCode: formState.stockCode,
     tradeDate: formState.tradeDate?.format('YYYY-MM-DD') || ''
   }
   const res = await createTrade(data)

@@ -23,8 +23,8 @@ spring:
 
 jwt:
   # 本地开发 JWT 密钥（>= 32 字节），与 auth-service 保持一致
-  secret: dev-only-jwt-secret-key-please-replace-in-production-0123456789
+  secret: ${JWT_SECRET:dev-only-jwt-secret-key-please-replace-in-production-0123456789}
 
 fuli:
   # 本地开发用随机密钥（>= 16 字节），请勿用于生产。
-  internal-key: dev-only-internal-key-0123456789
+  internal-key: ${INTERNAL_KEY:dev-only-internal-key-0123456789}

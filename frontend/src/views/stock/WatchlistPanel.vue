@@ -22,7 +22,7 @@
       >
         <div class="stock-info">
           <span class="wl-name">{{ stock.stockName }}</span>
-          <span class="wl-code">{{ stock.stockCode }}</span>
+          <span class="wl-code">{{ stock.stockCode.split('.')[0] }}</span>
         </div>
         <div class="stock-extra">
           <span v-if="stock.industry" class="wl-industry">{{ stock.industry }}</span>
@@ -43,7 +43,6 @@ import { computed, ref, onMounted } from 'vue'
 import { searchStocks, getStockLatestPrice } from '@/api/stock'
 import type { StockInfo } from '@/types'
 import { getWatchlist, addToWatchlist } from '@/api/watchlist'
-import { toTushareCode } from '@/utils/stockCode'
 
 const emit = defineEmits<{
   (e: 'select-stock', stock: StockInfo): void
@@ -93,14 +92,14 @@ const handleSearch = async (value: string) => {
 }
 
 const selectStock = async (stock: StockInfo) => {
-  // 如果是搜索结果，加到自选列表（纯数字代码）
+  // 如果是搜索结果，加到自选列表（完整符号，后端原值）
   if (keyword.value && searchResults.value.length > 0) {
-    const pureCode = stock.stockCode.split('.')[0]
-    if (!watchlist.value.find(s => s.stockCode === pureCode)) {
-      watchlist.value.push({ ...stock, stockCode: pureCode })
+    const code = stock.stockCode
+    if (!watchlist.value.find(s => s.stockCode === code)) {
+      watchlist.value.push({ ...stock })
       // 同步到后端
       try {
-        await addToWatchlist({ stockCode: pureCode, stockName: stock.stockName })
+        await addToWatchlist({ stockCode: code, stockName: stock.stockName })
     } catch (e) {
       console.error('[WatchlistPanel] 添加自选失败:', e)
     }
@@ -108,7 +107,7 @@ const selectStock = async (stock: StockInfo) => {
     keyword.value = ''
     searchResults.value = []
   }
-  emit('select-stock', { ...stock, stockCode: stock.stockCode.split('.')[0] })
+  emit('select-stock', { ...stock })
 }
 
 const loadWatchlist = async () => {
@@ -126,9 +125,9 @@ const loadWatchlist = async () => {
     console.error('[WatchlistPanel] 加载失败:', e)
     // 失败时使用默认
     watchlist.value = [
-      { stockCode: '600519', stockName: '贵州茅台', industry: '白酒', market: '上海' },
-      { stockCode: '000001', stockName: '平安银行', industry: '银行', market: '深圳' },
-      { stockCode: '300750', stockName: '宁德时代', industry: '电池', market: '深圳' }
+      { stockCode: '600519.SH', stockName: '贵州茅台', industry: '白酒', market: '上海' },
+      { stockCode: '000001.SZ', stockName: '平安银行', industry: '银行', market: '深圳' },
+      { stockCode: '300750.SZ', stockName: '宁德时代', industry: '电池', market: '深圳' }
     ]
   }
   // 加载真实行情数据
@@ -139,8 +138,7 @@ const loadWatchlist = async () => {
 const loadAllPrices = async () => {
   for (const stock of watchlist.value) {
     try {
-      const tushareCode = toTushareCode(stock.stockCode)
-      const res = await getStockLatestPrice(tushareCode)
+      const res = await getStockLatestPrice(stock.stockCode)
       if (res.code === 200 && res.data) {
         const { closePrice, preClose } = res.data
         const close = parseFloat(closePrice)

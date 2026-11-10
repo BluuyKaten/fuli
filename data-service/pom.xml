@@ -58,6 +58,15 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
+        <!--
+            Redis：用于日线 K 线的 L2 缓存（ADR-0004）。
+            common-api 里该依赖是 provided scope，不会传递，必须在此显式声明。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
         <!-- DevTools (热重载) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -101,6 +110,12 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- Spring AI MCP Server（P5）：把 OKX 只读能力暴露成 MCP 工具 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
         </dependency>
 
         <!-- springdoc-openapi -->

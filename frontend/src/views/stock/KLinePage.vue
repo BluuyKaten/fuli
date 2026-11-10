@@ -109,7 +109,6 @@ import TradePanel from './TradePanel.vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import type { IconName } from '@/components/ui/icons'
 import type { StockInfo } from '@/types'
-import { toPureCode } from '@/utils/stockCode'
 import { flashTick, revealIn } from '@/theme/motion'
 
 const { topRow, bottomRow, vRatio, resizeHorizontal, resizeVertical, restore } = useFlexPanels()
@@ -120,7 +119,7 @@ const positionRef = ref<InstanceType<typeof PositionPanel> | null>(null)
 const priceRef = ref<HTMLElement | null>(null)
 
 // 默认展示股票（fallback）：用户未自选时展示此股票，便于新用户快速预览
-const DEFAULT_STOCK = { stockCode: '600519', stockName: '贵州茅台' }
+const DEFAULT_STOCK = { stockCode: '600519.SH', stockName: '贵州茅台' }
 
 // 当前选中股票（优先恢复上次查看的，否则默认贵州茅台）
 const _restored = (() => {
@@ -201,7 +200,8 @@ const bindDragEvents = () => {
 }
 
 const onSelectStock = (stock: StockInfo) => {
-  activeStock.value = { ...stock, stockCode: toPureCode(stock.stockCode) }
+  // 后端原值（完整符号），前端不再剥离后缀——解析只由服务端 StockCodeUtil 负责
+  activeStock.value = { ...stock }
   localStorage.setItem('lastViewedStock', JSON.stringify(activeStock.value))
   currentPrice.value = ''
   lastPrice = 0

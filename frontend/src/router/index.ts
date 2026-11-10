@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import BasicLayout from '@/layouts/BasicLayout.vue'
+import { isTokenExpired } from '@/utils/jwt'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -74,6 +75,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '数据同步' }
       },
       {
+        path: 'okx',
+        name: 'OkxSettings',
+        component: () => import('@/views/okx/OkxSettingsPage.vue'),
+        meta: { title: 'OKX 账户' }
+      },
+      {
         path: 'account',
         name: 'AccountProfile',
         component: () => import('@/views/account/ProfilePage.vue'),
@@ -90,9 +97,17 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const token = localStorage.getItem('token')
-  if (to.path !== '/login' && !token) {
+  // 只有「令牌存在但已过期」才主动清理；没有令牌时保持安静（首次访问不该弹提示）
+  if (token && isTokenExpired(token)) {
+    localStorage.removeItem('token')
+    localStorage.removeItem('nickname')
+    localStorage.removeItem('userId')
+    localStorage.removeItem('cash')
+  }
+  const valid = !!token && !isTokenExpired(token)
+  if (to.path !== '/login' && !valid) {
     next('/login')
-  } else if (to.path === '/login' && token) {
+  } else if (to.path === '/login' && valid) {
     next('/dashboard')
   } else {
     next()

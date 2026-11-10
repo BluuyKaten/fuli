@@ -53,6 +53,35 @@ public class JwtUtil {
                 .compact();
     }
 
+    /**
+     * 服务令牌（client_credentials，ADR-0010 决策 4）。
+     *
+     * <p>与用户令牌的区别全在 claim 上，签名密钥与算法完全相同：
+     * <ul>
+     *   <li>没有 {@code userId}——它不是任何一个用户；</li>
+     *   <li>{@code type=SERVICE}——data-service 据此走「只读」分支；</li>
+     *   <li>{@code scope} / {@code aud}——按最小权限与受众签发，data-service 会校验 aud，
+     *       因此这张票拿到别的服务不被承认（这是「禁止 token passthrough」的另一半）。</li>
+     * </ul>
+     *
+     * @param ttlSeconds 有效期，默认 15 分钟；短有效期让「泄露后重放」的窗口足够小
+     */
+    public String generateServiceToken(String clientId, String scope, long ttlSeconds,
+                                       String audience) {
+        Date now = new Date();
+        Date expiry = new Date(now.getTime() + Math.max(1, ttlSeconds) * 1000L);
+        return Jwts.builder()
+                .subject(clientId)
+                .claim("type", "SERVICE")
+                .claim("scope", scope)
+                .audience().add(audience).and()
+                .issuedAt(now)
+                .expiration(expiry)
+                .id(UUID.randomUUID().toString())
+                .signWith(getSigningKey())
+                .compact();
+    }
+
     public Claims parseToken(String token) {
         return Jwts.parser()
                 .verifyWith(getSigningKey())

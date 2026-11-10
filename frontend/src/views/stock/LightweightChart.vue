@@ -127,11 +127,21 @@
         </div>
       </div>
     </div>
+
+    <!-- 全貌缩略条：主图只加载最近 620 根，这条负责保留「全历史长什么样」 -->
+    <SparklineStrip
+      v-if="currentPeriod === '1D'"
+      :points="sparkPoints"
+      :window-from="windowFrom"
+      :window-to="windowTo"
+      :markers="sparkMarkers"
+      @seek="onSeek"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch, computed, nextTick } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch, computed, nextTick } from 'vue'
 import type { ISeriesApi, Time, UTCTimestamp } from 'lightweight-charts'
 import { message } from 'ant-design-vue'
 import {
@@ -139,10 +149,12 @@ import {
   getStockWeeklyData,
   getStockMonthlyData,
   getStockDailyData,
+  getStockSparkline,
   saveDrawing
 } from '@/api/kline'
-import { toTushareCode } from '@/utils/stockCode'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import SparklineStrip from '@/components/chart/SparklineStrip.vue'
+import { shouldSkipLoad } from '@/utils/loadGuard'
 import type { CandleItem } from '@/types/indicators'
 import type { ChartTheme } from '@/types/chart'
 import { useChartCore } from '@/composables/useChartCore'
@@ -155,7 +167,7 @@ import { useInfoPanel } from '@/composables/useInfoPanel'
 
 // --- 组件 props / emits ---
 const props = defineProps<{
-  stockCode: string // 纯数字 300750
+  stockCode: string // 完整符号 600519.SH（后端原值，解析交给服务端）
 }>()
 
 const emit = defineEmits<{
@@ -201,7 +213,7 @@ const { activeIndicators, updateIndicators, saveIndicators, clearAllIndicators }
 
 // candleSeries ref：用于传递给 useTradeMarkers
 const candleSeries = ref<ISeriesApi<'Candlestick'> | null>(null)
-const { loadAutoMarkers, addManualMarker, disposeMarkers } = useTradeMarkers(candleSeries)
+const { markers, loadAutoMarkers, clearAutoMarkers, addManualMarker, disposeMarkers } = useTradeMarkers(candleSeries)
 
 const {
   currentTool, initCanvas, startDraw, cancelDraw, addPoint, updateMousePosition,
@@ -212,15 +224,19 @@ const {
 const { exporting, exportPNG, exportCSV } = useChartExport(chartContainer)
 
 // K 线数据 ref：用于传递给 useInfoPanel
-const dailyData = ref<CandleItem[]>([])
+//
+// 必须用 shallowRef 而不是 ref。ref 会对数组做深度响应式，几千个 bar 的
+// 每个字段都被 Proxy 递归包裹；指标计算要遍历全部 bar，等于逐字段触发代理创建。
+// 实测（docs/perf/bench-frontend.mjs）：5,071 根时 reactive 数组的指标计算
+// 是裸数组的 8.2 倍（91.4ms vs 11.2ms）。
+// 这里只整体赋值、整体读取，从不需要对单个 bar 做响应式修改，深度代理纯属浪费。
+// 详见 docs/adr/0002-kline-windowed-loading.md。
+const dailyData = shallowRef<CandleItem[]>([])
 const { panelData, subscribeCrosshair, unsubscribeCrosshair } = useInfoPanel(
   chart,
   dailyData,
   activeIndicators
 )
-
-// Tushare 代码（用于画线保存/加载，与数据库格式一致）
-const tushareCode = computed(() => toTushareCode(props.stockCode))
 
 // --- 周期选项 ---
 const periods = [
@@ -423,15 +439,266 @@ const handleExportCSV = () => {
 }
 
 // --- 加载 K 线数据 ---
+
+/** 默认视窗根数。1200px 宽的图区画 500 根已是每根 2.4px，再多也分辨不出。 */
+const DAILY_WINDOW = 500
+
+/** 指标前置窗口。MA60 需 59 根、MACD 需 33 根；取 120 是留一倍余量，
+ *  用户把均线周期改成 MA120 时边缘也不会断线。 */
+const DAILY_LOOKBACK = 120
+
+// --- 全貌缩略条 ---
+
+/** 降采样后的全历史收盘序列（服务端 LTTB，约 240 点） */
+const sparkPoints = ref<{ d: number; c: number }[]>([])
+/** 当前视窗在全历史中的起止比例，0~1 */
+const windowFrom = ref(0)
+const windowTo = ref(1)
+
+const loadSparkline = async () => {
+  try {
+    const res = await getStockSparkline(props.stockCode, 240)
+    sparkPoints.value = (res.data || []) as { d: number; c: number }[]
+  } catch {
+    // 缩略条只是辅助信息，拿不到就不显示，不影响主图
+    sparkPoints.value = []
+  }
+}
+
+/** 把主图可视区间换算成缩略条上的比例 */
+const syncWindowRatio = (range: { from: number; to: number } | null) => {
+  const bars = dailyData.value
+  const pts = sparkPoints.value
+  if (!range || !bars.length || pts.length < 2) return
+  const i0 = Math.max(0, Math.floor(range.from))
+  const i1 = Math.min(bars.length - 1, Math.ceil(range.to))
+  const d0 = Number(String(bars[i0].time).replace(/-/g, ''))
+  const d1 = Number(String(bars[i1].time).replace(/-/g, ''))
+  const first = pts[0].d
+  const last = pts[pts.length - 1].d
+  const span = last - first || 1
+  windowFrom.value = Math.min(1, Math.max(0, (d0 - first) / span))
+  windowTo.value = Math.min(1, Math.max(0, (d1 - first) / span))
+}
+
+/** 缩略条上的买卖点；坐标由子组件按价格区间换算 */
+const sparkMarkers = computed(() =>
+  markers.value.map(m => ({
+    d: String(m.time),
+    direction: m.direction,
+    price: m.price
+  }))
+)
+
+/** 点击缩略条时最多自动向前补几页（每页 500 根）。3 页 ≈ 1500 根，覆盖绝大多数回看需求；
+ *  再多就等于把全历史拉进内存，窗口化的收益会被吃回去。 */
+const MAX_SEEK_PAGES = 3
+
+/**
+ * 点击缩略条，把主图移到对应日期。
+ *
+ * 目标常常早于已加载窗口（主图只拿最近 620 根），此时自动向前补页，而不是只弹一句
+ * "不在已加载区间" 让用户自己拖。补页数有上限，见 {@link MAX_SEEK_PAGES}。
+ */
+const onSeek = async (date: number) => {
+  const s = String(date)
+  const iso = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+  const locate = () => dailyData.value.findIndex(b => String(b.time) === iso)
+
+  let idx = locate()
+  let pages = 0
+
+  if (idx < 0 && dailyData.value.length) {
+    const earliest = String(dailyData.value[0].time)
+    if (iso < earliest) {
+      // 目标早于已加载范围：逐页向前补，直到覆盖或达到上限
+      while (pages < MAX_SEEK_PAGES && hasMoreHistory.value) {
+        const before = dailyData.value.length
+        await loadOlder()
+        pages++
+        // 没有新增说明已经到上市首日，停止
+        if (dailyData.value.length === before) break
+        if (String(dailyData.value[0].time) <= iso) break
+      }
+      idx = locate()
+    }
+  }
+
+  if (idx < 0) {
+    message.info(
+      pages > 0
+        ? `已向前加载 ${pages} 页仍未覆盖该日期，继续向左拖动可加载更早数据`
+        : '该日期无行情数据'
+    )
+    return
+  }
+
+  const half = Math.floor(DAILY_WINDOW / 2)
+  chart.value?.timeScale().setVisibleLogicalRange({
+    from: Math.max(0, idx - half),
+    to: Math.min(dailyData.value.length - 1, idx + half)
+  })
+}
+
+/**
+ * 把可视区间定位到「前置区之后」，让用户看到的是最近 500 根，
+ * 而不是把 620 根全挤进视窗。数据不足窗口长度时不做处理。
+ */
+const applyInitialWindow = (barCount: number) => {
+  const lookback = Math.min(DAILY_LOOKBACK, Math.max(0, barCount - DAILY_WINDOW))
+  if (lookback <= 0 || !chart.value) return
+  chart.value.timeScale().setVisibleLogicalRange({ from: lookback, to: barCount - 1 })
+}
+
+/** 当前已加载 K 线的日期范围，用于过滤越界的成交标记 */
+const barRange = (): { from: string; to: string } | undefined => {
+  const d = dailyData.value
+  if (!d.length) return undefined
+  return { from: String(d[0].time), to: String(d[d.length - 1].time) }
+}
+
+/**
+ * 刷新历史成交标记（买入点/卖出点）。
+ *
+ * 两个约束：
+ * 1. 窗口化后只加载最近 620 根，早于此的成交不在 series 数据范围内，
+ *    传给 lightweight-charts 会被拒绝渲染。由 loadAutoMarkers 内部按范围过滤。
+ * 2. 分钟周期的时间轴是 timestamp，而成交记录只有日期（"2025-01-01"），
+ *    类型不同无法定位，因此分钟周期不显示成交标记。
+ */
+const refreshAutoMarkers = async () => {
+  if (!['1D', '1W', '1M'].includes(currentPeriod.value)) {
+    clearAutoMarkers()
+    return
+  }
+  // 传完整符号（002636.SZ）。props.stockCode 由上层透传后端原值，不再本地剥离后缀；
+  // trade_record.stock_code 存的是同一格式，直接传即可命中。
+  await loadAutoMarkers(props.stockCode, barRange())
+}
+
+const isDailyPeriod = () => ['1D', '1W', '1M'].includes(currentPeriod.value)
+
+/** 后端原始 bar → 图表 CandleItem。抽出来是为了首次加载和左滑加载共用同一套字段兜底。 */
+const toCandles = (data: RawKlineItem[], isDaily: boolean): CandleItem[] =>
+  data.map(d => ({
+    time: parseTime(d.time ?? d.tradeDate, isDaily),
+    open: Number(d.open ?? d.openPrice ?? 0),
+    high: Number(d.high ?? d.highPrice ?? 0),
+    low: Number(d.low ?? d.lowPrice ?? 0),
+    close: Number(d.close ?? d.closePrice ?? 0),
+    volume: Number(d.volume ?? d.vol ?? 0)
+  }))
+
+const toVolumes = (data: RawKlineItem[], isDaily: boolean): VolumeItem[] =>
+  data.map(d => ({
+    time: parseTime(d.time ?? d.tradeDate, isDaily),
+    value: Number(d.volume ?? d.vol ?? 0),
+    color: Number(d.close ?? d.closePrice ?? 0) >= Number(d.open ?? d.openPrice ?? 0) ? '#ef535080' : '#26a69a80'
+  }))
+
+/** 已合并的 candles 直接生成成交量柱，省一次重新映射 */
+const candlesToVolumes = (bars: CandleItem[]): VolumeItem[] =>
+  bars.map(b => ({
+    time: b.time,
+    value: b.volume ?? 0,
+    color: b.close >= b.open ? '#ef535080' : '#26a69a80'
+  }))
+
+// --- 左滑加载更早历史 ---
+
+/** 每次向前补多少根 */
+const LOAD_MORE_SIZE = 500
+/** 距离左边缘还剩多少根时开始预加载 */
+const LOAD_MORE_THRESHOLD = 20
+
+const loadingMore = ref(false)
+const hasMoreHistory = ref(true)
+
+/** "2024-04-11" → "2024-04-10"（days 为负） */
+const shiftDate = (iso: string, days: number): string => {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * 向前（更早）加载一页日线。
+ *
+ * 两个必须处理的副作用：
+ * 1. setData 会把 timeScale 重置为「显示全部」，用户当前浏览位置会丢，
+ *    所以要记录 logicalRange 并按新增根数偏移后恢复。
+ * 2. 画线是屏幕坐标，数据变了必须 redraw；成交标记的范围也变了，要重新过滤。
+ */
+const loadOlder = async () => {
+  if (loadingMore.value || !hasMoreHistory.value) return
+  if (currentPeriod.value !== '1D') return
+  const bars = dailyData.value
+  if (bars.length === 0) return
+
+  loadingMore.value = true
+  try {
+    const earliest = String(bars[0].time)
+    const res = await getStockDailyData(props.stockCode, {
+      endDate: shiftDate(earliest, -1).replace(/-/g, ''),
+      limit: LOAD_MORE_SIZE
+    })
+    const raw = (res.data || []) as RawKlineItem[]
+    if (raw.length === 0) {
+      hasMoreHistory.value = false
+      return
+    }
+
+    const older = toCandles(raw, true)
+    const existing = new Set(bars.map(b => String(b.time)))
+    const fresh = older.filter(b => !existing.has(String(b.time)))
+    if (fresh.length === 0) {
+      // 后端返回的都已在本地（边界重复），说明到头了
+      hasMoreHistory.value = false
+      return
+    }
+
+    const merged = [...fresh, ...bars]
+    const range = chart.value?.timeScale().getVisibleLogicalRange()
+
+    dailyData.value = merged
+    candleSeries.value?.setData(merged)
+    volumeSeries?.setData(candlesToVolumes(merged))
+    refreshIndicators()
+
+    if (range) {
+      chart.value?.timeScale().setVisibleLogicalRange({
+        from: range.from + fresh.length,
+        to: range.to + fresh.length
+      })
+    }
+
+    redraw()
+    refreshAutoMarkers()
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '未知错误'
+    message.error(`加载更早数据失败: ${msg}`)
+  } finally {
+    loadingMore.value = false
+  }
+}
+
 const loadData = async () => {
   if (!props.stockCode) return
+  // 同参数 400ms 内只放行一次。状态放在 loadGuard 模块里而不是这里——
+  // `<script setup>` 的变量属于组件实例，:key 变化重建后会归零，闸门就失效了。
+  const dedupeKey = `${props.stockCode}|${currentPeriod.value}`
+  if (shouldSkipLoad(dedupeKey)) {
+    console.info('[K线] 跳过重复加载', dedupeKey)
+    return
+  }
+  console.count('[K线] loadData')
   try {
     let data: RawKlineItem[] = []
     const period = currentPeriod.value
-    const tushareCode = toTushareCode(props.stockCode)
+    const code = props.stockCode
 
     if (period === '1D') {
-      const res = await getStockDailyData(tushareCode)
+      const res = await getStockDailyData(code, { limit: DAILY_WINDOW + DAILY_LOOKBACK })
       data = res.data || []
     } else if (['1', '5', '15', '60'].includes(period)) {
       const res = await getStockMinuteData(props.stockCode, parseInt(period))
@@ -445,21 +712,16 @@ const loadData = async () => {
     }
 
     // 转换为 Lightweight Charts 格式
-    const isDaily = ['1D', '1W', '1M'].includes(currentPeriod.value)
-    const candles: CandleItem[] = data.map((d) => ({
-      time: parseTime(d.time ?? d.tradeDate, isDaily),
-      open: Number(d.open ?? d.openPrice ?? 0),
-      high: Number(d.high ?? d.highPrice ?? 0),
-      low: Number(d.low ?? d.lowPrice ?? 0),
-      close: Number(d.close ?? d.closePrice ?? 0),
-      volume: Number(d.volume ?? d.vol ?? 0)
-    }))
+    const isDaily = isDailyPeriod()
+    const candles = toCandles(data, isDaily)
+    const volumes = toVolumes(data, isDaily)
 
-    const volumes: VolumeItem[] = data.map((d) => ({
-      time: parseTime(d.time ?? d.tradeDate, isDaily),
-      value: Number(d.volume ?? d.vol ?? 0),
-      color: Number(d.close ?? d.closePrice ?? 0) >= Number(d.open ?? d.openPrice ?? 0) ? '#ef535080' : '#26a69a80'
-    }))
+    // 日线首屏：拿满了窗口长度才认为后面还有更早的数据可加载
+    if (period === '1D') {
+      hasMoreHistory.value = candles.length >= DAILY_WINDOW + DAILY_LOOKBACK
+      // 不 await：缩略条是辅助信息，不应阻塞主图渲染
+      void loadSparkline()
+    }
 
     // 更新数据 ref（供 useInfoPanel 使用）
     dailyData.value = candles
@@ -474,6 +736,12 @@ const loadData = async () => {
 
     // 刷新指标渲染
     refreshIndicators()
+
+    // 视窗定位到前置区之后。必须在 setData 与 refreshIndicators 之后执行，
+    // 因为 setData 会把 timeScale 重置为「显示全部」。
+    if (period === '1D') {
+      applyInitialWindow(candles.length)
+    }
 
     // 最新价通知
     if (candles.length > 0) {
@@ -491,6 +759,9 @@ const loadData = async () => {
 
 // --- 成交量系列引用 ---
 let volumeSeries: ISeriesApi<'Histogram'> | null = null
+
+// --- 本组件自己注册的视窗变化回调（卸载时要按同一引用退订） ---
+let onVisibleRangeChange: ((range: { from: number; to: number } | null) => void) | null = null
 
 // --- 初始化图表 ---
 const initChartInstance = () => {
@@ -537,6 +808,20 @@ const initChartInstance = () => {
     })
     resizeObserver.value.observe(chartContainer.value)
   }
+
+  // 左滑到接近左边缘时，向前补一页历史。
+  // 该事件同时被 useDrawingTools 订阅用于 redraw，lightweight-charts 支持多订阅者。
+  // 首次 setVisibleLogicalRange 时 from=120，不会触发预加载。
+  // 注意：订阅的回调必须存下来，卸载时按同一个引用退订——inline 箭头函数订阅后
+  // 无法退订，图表若被复用（HMR / 切换标的）就会残留旧闭包，重复触发 loadOlder。
+  onVisibleRangeChange = range => {
+    if (!range) return
+    syncWindowRatio(range)
+    if (range.from < LOAD_MORE_THRESHOLD) {
+      void loadOlder()
+    }
+  }
+  chart.value?.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange)
 }
 
 // --- 监听主题变化 ---
@@ -556,8 +841,8 @@ watch(currentPeriod, async () => {
   redraw()
   await loadData()
   await nextTick() // 等待 K 线图渲染
-  loadDrawings(tushareCode.value, currentPeriod.value)
-  loadAutoMarkers(props.stockCode)
+  loadDrawings(props.stockCode, currentPeriod.value)
+  refreshAutoMarkers()
 })
 
 // --- 监听股票变化 ---
@@ -581,8 +866,8 @@ watch(() => props.stockCode, async () => {
     redraw()
     await loadData()
     await nextTick() // 等待 K 线图渲染
-    loadDrawings(tushareCode.value, currentPeriod.value)
-    loadAutoMarkers(props.stockCode)
+    loadDrawings(props.stockCode, currentPeriod.value)
+    refreshAutoMarkers()
   }
 })
 
@@ -609,9 +894,10 @@ onMounted(() => {
   subscribeChartMove()
 
   // 加载数据
-  loadData()
-  loadDrawings(tushareCode.value, currentPeriod.value)
-  loadAutoMarkers(props.stockCode)
+  // 标记必须在数据落地之后再加载：loadAutoMarkers 依赖 barRange() 过滤越界点，
+  // 提前调用会拿到空范围，等于不过滤，反而让越界标记进入 series。
+  loadData().then(() => refreshAutoMarkers())
+  loadDrawings(props.stockCode, currentPeriod.value)
 
   // 监听键盘删除事件
   window.addEventListener('keydown', onKeyDown)
@@ -642,6 +928,11 @@ const clearAllDrawings = () => {
 // --- 生命周期：卸载 ---
 onBeforeUnmount(() => {
   resizeObserver.value?.disconnect()
+  // 先退订本组件的视窗回调，再销毁图表（顺序反了 chart 已置空，退订就拿不到 timeScale）
+  if (onVisibleRangeChange) {
+    chart.value?.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange)
+    onVisibleRangeChange = null
+  }
   unsubscribeCrosshair()
   disposeDrawingTools()
   disposeMarkers()
@@ -656,7 +947,7 @@ onBeforeUnmount(() => {
 const saveDrawingsOnUnmount = () => {
   if (!drawings.value.length) return
   const userId = Number(localStorage.getItem('userId') || '0')
-  const stockCode = toTushareCode(props.stockCode)
+  const stockCode = props.stockCode
   const data = JSON.stringify(drawings.value)
   // 同步保存到 localStorage（确保不丢失）
   const LOCAL_KEY = 'kline_drawings'

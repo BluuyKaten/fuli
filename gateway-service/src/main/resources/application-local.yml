@@ -5,16 +5,17 @@
 
 # 本地开发 JWT 密钥（>= 32 字节），与 auth-service local profile 保持一致
 jwt:
-  secret: dev-only-jwt-secret-key-please-replace-in-production-0123456789
+  secret: ${JWT_SECRET:dev-only-jwt-secret-key-please-replace-in-production-0123456789}
 
 # 本地开发内部服务密钥（>= 16 字节）
 fuli:
-  internal-key: dev-only-internal-key-0123456789
+  internal-key: ${INTERNAL_KEY:dev-only-internal-key-0123456789}
   routes:
     auth: http://localhost:8081
     trade: http://localhost:8082
     analysis: http://localhost:8083
     data: http://localhost:8084
+    ai: http://localhost:8085
 
 spring:
   cloud:
@@ -23,6 +24,14 @@ spring:
         enabled: false
       discovery:
         enabled: false
+
+# 本地不跑 Redis 时，Redis 健康探针会把整体状态报成 DOWN。
+# JwtGlobalFilter 对 Redis 是可选依赖（ObjectProvider + fail-open），
+# 没有 Redis 只意味着不校验 token 黑名单，不影响本地开发。
+management:
+  health:
+    redis:
+      enabled: false
 
 # 本地开发保留网关路由 DEBUG 日志；生产环境为 INFO。
 logging:

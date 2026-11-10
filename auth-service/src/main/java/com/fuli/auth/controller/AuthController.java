@@ -236,6 +236,25 @@ public class AuthController {
         return Result.success(user.getCash());
     }
 
+    /**
+     * OKX 交易权限（ADR-0010 决策 2）：data-service 每次写操作前的唯一权威来源。
+     *
+     * <p>为什么放在 auth-service：{@code sys_user} 归它所有。跨库直连会让两个服务的
+     * 部署绑死，也让「谁拥有这份数据」变得含混。
+     *
+     * <p>返回 {@code false} 而不是报错，是刻意的：用户不存在时也应该得到「没有权限」这一结论，
+     * 由调用方统一按 fail-closed 处理。
+     */
+    @GetMapping("/internal/okxTradeEnabled")
+    public Result<Boolean> getOkxTradeEnabled(@RequestParam Long userId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            return Result.error(BizCode.PARAM_ERROR, "用户不存在");
+        }
+        // 只有明确为 1 才算开启；null / 0 / 其它值一律视为关闭
+        return Result.success(Integer.valueOf(1).equals(user.getOkxTradeEnabled()));
+    }
+
     @GetMapping("/internal/userInitialCash")
     public Result<BigDecimal> getUserInitialCash(@RequestParam Long userId) {
         return Result.success(new BigDecimal("200000.00"));

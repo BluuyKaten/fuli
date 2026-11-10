@@ -25,6 +25,7 @@
         <module>trade-service</module>
         <module>analysis-service</module>
         <module>data-service</module>
+        <module>ai-service</module>
     </modules>
 
     <properties>
@@ -55,6 +56,15 @@
                 <groupId>com.alibaba.cloud</groupId>
                 <artifactId>spring-cloud-alibaba-dependencies</artifactId>
                 <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring AI BOM（P5：Java 侧 MCP Server，不装 npm 包） -->
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>2.0.1</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
