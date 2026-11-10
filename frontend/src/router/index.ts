@@ -81,6 +81,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'OKX 账户' }
       },
       {
+        path: 'okx/suggestions',
+        name: 'OkxSuggestions',
+        component: () => import('@/views/okx/OkxSuggestionsPage.vue'),
+        meta: { title: '建议单确认' }
+      },
+      {
         path: 'account',
         name: 'AccountProfile',
         component: () => import('@/views/account/ProfilePage.vue'),

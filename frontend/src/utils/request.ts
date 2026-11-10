@@ -55,7 +55,9 @@ request.interceptors.response.use(
         router.push('/login')
         notifyError('登录已过期，请重新登录')
       } else if (status === 403) {
-        notifyError('没有权限访问')
+        // 后端对 403 给了精确原因（如「未授予 OKX 交易权限」「服务账号不允许写操作」），
+        // 优先透出，否则用户只能看到「没有权限」，不知道自己该去开什么权限
+        notifyError(error.response.data?.message || '没有权限访问')
       } else if (status === 404) {
         notifyError('请求的资源不存在')
       } else if (status === 503) {
