@@ -18,6 +18,10 @@ class SmaCrossStrategy(Strategy):
         self.fast = fast
         self.slow = slow
 
+    def describe(self) -> str:
+        """给实时信号 runner 用：写进建议单 reason 的人话说明。"""
+        return "SMA(%d,%d) cross" % (self.fast, self.slow)
+
     def on_bar(self, ctx: Context) -> Optional[Order]:
         closes = [b.close for b in ctx.bars]
         if len(closes) < self.slow + 1:

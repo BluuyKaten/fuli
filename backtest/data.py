@@ -15,6 +15,10 @@ from .types import Bar
 
 _TIMEOUT_SECONDS = 30
 
+# 内网/本机直连，显式关掉系统代理：Windows 上 http_proxy 常指向公司代理，
+# 连 127.0.0.1:8084 也会被代理转走，表现为 502 或连不上（实测踩过）。
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 def fetch_bars(base_url: str, symbol: str, period: str,
                frm: Optional[str] = None, to: Optional[str] = None,
@@ -30,7 +34,7 @@ def fetch_bars(base_url: str, symbol: str, period: str,
 
     url = base_url.rstrip("/") + "/market/bars?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
+    with _OPENER.open(req, timeout=_TIMEOUT_SECONDS) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
 
     if payload.get("code") != 200:

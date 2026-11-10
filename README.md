@@ -29,6 +29,9 @@
 - 🚦 **网关全局限流**：令牌桶限流，已认证按用户、登录/注册按 IP（防爆破），429 + `Retry-After`，fail-open
 - 🎯 **加密回测（阶段 2）**：Binance Vision / Gate 行情落 `bar`，Python 确定性回测引擎
   （次根开盘撮合、滑点/费率参数化、净值/回撤/胜率/获利因子），`Strategy` 接口回测与实盘共用
+- 🔗 **策略信号 → 建议单桥接**：`backtest/live_signal.py` 用同一份 `Strategy` 跑实时信号，
+  只看已完结 bar、同一根 bar 只决策一次、连续同向不重复写，信号落 `okx_order_suggestion`
+  等人工确认——回测、实时、下单三段共用一份策略代码
 
 ## 技术栈
 

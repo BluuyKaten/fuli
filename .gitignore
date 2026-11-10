@@ -59,3 +59,8 @@ frontend/.browser-smoke/
 
 ### 数据库迁移的本地备份产物（环境相关，禁止提交） ###
 sql/migrations/backup/
+
+### Python 缓存与实时信号运行态（本地产物，禁止提交） ###
+__pycache__/
+*.py[cod]
+backtest/.state/
