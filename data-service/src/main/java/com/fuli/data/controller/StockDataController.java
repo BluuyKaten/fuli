@@ -64,15 +64,41 @@ public class StockDataController {
 
     /**
      * 搜索股票（按代码或名称模糊匹配）。
+     *
+     * <p>A 股走 {@code stock_info}；美股/加密走 {@code instrument}（阶段 1 起，让前端能搜到
+     * 已同步的非 A 股标的，如 {@code AAPL.US}）。
      */
     @GetMapping("/search")
     public List<Map<String, Object>> searchStocks(@RequestParam("keyword") String keyword) {
+        List<Map<String, Object>> result = new ArrayList<>();
+
         QueryWrapper<StockInfo> wrapper = new QueryWrapper<>();
         wrapper.like("stock_code", keyword).or().like("stock_name", keyword);
         wrapper.orderByAsc("stock_code");
         wrapper.last("LIMIT 20");
-        List<StockInfo> stocks = stockInfoMapper.selectList(wrapper);
-        return stocks.stream().map(this::toMap).collect(java.util.stream.Collectors.toList());
+        for (StockInfo s : stockInfoMapper.selectList(wrapper)) {
+            result.add(toMap(s));
+        }
+
+        // 非 A 股（US / CRYPTO）从 instrument 表搜
+        QueryWrapper<Instrument> insWrapper = new QueryWrapper<>();
+        insWrapper.and(q -> q.like("code", keyword).or().like("name", keyword));
+        insWrapper.in("market", "US", "CRYPTO");
+        insWrapper.orderByAsc("code");
+        insWrapper.last("LIMIT 20");
+        for (Instrument ins : instrumentMapper.selectList(insWrapper)) {
+            result.add(toSearchMap(ins));
+        }
+        return result;
+    }
+
+    private Map<String, Object> toSearchMap(Instrument ins) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("stockCode", ins.getCode());
+        map.put("stockName", ins.getName());
+        map.put("market", ins.getMarket());
+        map.put("status", ins.getStatus());
+        return map;
     }
 
     /**
