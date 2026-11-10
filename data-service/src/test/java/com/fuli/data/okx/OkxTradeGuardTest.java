@@ -4,6 +4,7 @@ import com.fuli.data.config.OkxConfig;
 import com.fuli.data.crypto.CryptoOrderService;
 import com.fuli.data.crypto.CryptoOrderState;
 import com.fuli.data.crypto.entity.CryptoOrder;
+import com.fuli.data.risk.RiskControlService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,8 @@ class OkxTradeGuardTest {
 
     private OkxCredentialService credentials;
 
+    private RiskControlService riskControl;
+
     private OkxTradeService service;
 
     @BeforeEach
@@ -55,6 +58,7 @@ class OkxTradeGuardTest {
         client = mock(OkxClient.class);
         orderLog = mock(CryptoOrderService.class);
         credentials = mock(OkxCredentialService.class);
+        riskControl = mock(RiskControlService.class);
         when(credentials.resolve(USER)).thenReturn(new OkxCredentials("key", "secret", "pass"));
         // 写前日志默认返回一笔刚落库的 pending 单，正常下单路径才能继续走
         when(orderLog.createPending(any())).thenAnswer(inv -> {
@@ -64,7 +68,7 @@ class OkxTradeGuardTest {
             o.setState(CryptoOrderState.PENDING.getCode());
             return o;
         });
-        service = new OkxTradeService(config, client, orderLog, credentials);
+        service = new OkxTradeService(config, client, orderLog, credentials, riskControl);
     }
 
     @Test

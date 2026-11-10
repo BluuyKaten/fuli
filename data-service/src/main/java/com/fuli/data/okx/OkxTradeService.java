@@ -8,6 +8,7 @@ import com.fuli.data.config.OkxConfig;
 import com.fuli.data.crypto.CryptoOrderService;
 import com.fuli.data.crypto.CryptoOrderState;
 import com.fuli.data.crypto.entity.CryptoOrder;
+import com.fuli.data.risk.RiskControlService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -54,6 +55,8 @@ public class OkxTradeService {
     private final CryptoOrderService orderLog;
 
     private final OkxCredentialService credentials;
+
+    private final RiskControlService riskControl;
 
     /** 账户配置：{@code acctLv} 决定能下什么单（1 简单 / 2 单币种保证金 / 3 跨币种 / 4 组合）。 */
     public JsonNode accountConfig(long userId) {
@@ -120,6 +123,10 @@ public class OkxTradeService {
         // 凭证在任何网络调用之前解析：没有凭证就直接失败，绝不发半截请求
         OkxCredentials creds = credentials.resolve(userId);
 
+        // 风控（阶段 3.4 四道）：单笔金额 + 日累计 + 回撤 + kill switch，下单前拦截
+        BigDecimal notional = riskNotional(pureId, ordType, size, price);
+        riskControl.checkBeforeOrder(userId, notional);
+
         // ① 写前日志：必须在任何网络调用之前落库
         CryptoOrder logged = orderLog.createPending(new CryptoOrderService.NewOrder(
                 effectiveClOrdId, pureId, "SPOT", side, ordType, price, size, "cash"));
@@ -158,6 +165,7 @@ public class OkxTradeService {
             sMsg = first.path("sMsg").asText(null);
         }
         orderLog.markSubmitted(effectiveClOrdId, ordId, sCode, sMsg);
+        riskControl.record(userId, notional);
         return response;
     }
 
@@ -202,6 +210,35 @@ public class OkxTradeService {
         item.put("sCode", "0");
         item.put("sMsg", "duplicate clOrdId: existing open order, request skipped");
         return root;
+    }
+
+    /** 计算本单金额：限价 = size × px；市价 = size × 最新成交价。 */
+    private BigDecimal riskNotional(String pureId, String ordType, BigDecimal size, BigDecimal price) {
+        if ("limit".equals(ordType)) {
+            return size.multiply(price);
+        }
+        BigDecimal last = latestPrice(pureId);
+        if (last == null) {
+            throw new IllegalStateException("无法获取最新价，市价单无法做金额风控：" + pureId);
+        }
+        return size.multiply(last);
+    }
+
+    /** 最新成交价（公共 ticker）。拿不到返回 null。 */
+    private BigDecimal latestPrice(String instId) {
+        try {
+            JsonNode resp = client.publicGet("/api/v5/market/ticker", Map.of("instId", instId));
+            JsonNode first = resp == null ? null : resp.path("data").path(0);
+            if (first != null && first.isObject()) {
+                String last = first.path("last").asText(null);
+                if (last != null && !last.isBlank()) {
+                    return new BigDecimal(last);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("查询最新价失败 {}: {}", instId, e.getMessage());
+        }
+        return null;
     }
 
     private void guardEnabled() {

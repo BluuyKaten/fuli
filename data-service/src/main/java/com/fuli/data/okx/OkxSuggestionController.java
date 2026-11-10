@@ -6,11 +6,14 @@ import com.fuli.data.security.OkxPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 查询自己的 Agent 建议单（只读）。
@@ -25,6 +28,8 @@ public class OkxSuggestionController {
 
     private final OkxSuggestionService suggestionService;
 
+    private final OkxSuggestionExecutionService executionService;
+
     private final OkxAuthz authz;
 
     @GetMapping
@@ -36,5 +41,21 @@ public class OkxSuggestionController {
             return Result.success(List.of());
         }
         return Result.success(suggestionService.recent(principal.userId(), limit == null ? 20 : limit));
+    }
+
+    /**
+     * 人工确认一条建议单并转真实模拟盘下单（阶段 3.3）。
+     *
+     * <p>写操作：要求用户级交易权限（{@code requireWrite}），服务账号硬 403。
+     * 下单失败时建议单保持 {@code new} 可重试。
+     */
+    @PostMapping("/{id}/execute")
+    public Result<Map<String, Object>> execute(HttpServletRequest request, @PathVariable("id") long id) {
+        try {
+            OkxPrincipal principal = authz.requireWrite(request, "executeSuggestion", "suggestionId=" + id);
+            return Result.success(executionService.execute(principal.userId(), id));
+        } catch (IllegalArgumentException e) {
+            return Result.error(400, e.getMessage());
+        }
     }
 }

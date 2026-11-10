@@ -7,6 +7,7 @@ import com.fuli.data.config.OkxConfig;
 import com.fuli.data.crypto.CryptoOrderService;
 import com.fuli.data.crypto.CryptoOrderState;
 import com.fuli.data.crypto.entity.CryptoOrder;
+import com.fuli.data.risk.RiskControlService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -41,6 +42,8 @@ class OkxTradeServiceWriteAheadTest {
     private OkxClient client;
     private CryptoOrderService orderLog;
     private OkxCredentialService credentials;
+
+    private RiskControlService riskControl;
     private OkxTradeService service;
 
     @BeforeEach
@@ -50,6 +53,7 @@ class OkxTradeServiceWriteAheadTest {
         client = mock(OkxClient.class);
         orderLog = mock(CryptoOrderService.class);
         credentials = mock(OkxCredentialService.class);
+        riskControl = mock(RiskControlService.class);
         when(credentials.resolve(USER)).thenReturn(new OkxCredentials("key", "01234567890123456789012345678901", "pass"));
         when(orderLog.createPending(any())).thenAnswer(inv -> {
             CryptoOrderService.NewOrder req = inv.getArgument(0);
@@ -60,7 +64,17 @@ class OkxTradeServiceWriteAheadTest {
         });
         when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
                 .thenReturn(response("ord-1", "0", ""));
-        service = new OkxTradeService(config, client, orderLog, credentials);
+        // 市价单风控需要最新价：mock 公共 ticker 返回 last
+        when(client.publicGet(eq("/api/v5/market/ticker"), any()))
+                .thenReturn(tickerResponse("30000"));
+        service = new OkxTradeService(config, client, orderLog, credentials, riskControl);
+    }
+
+    private static JsonNode tickerResponse(String last) {
+        ObjectNode root = JsonNodeFactory.instance.objectNode();
+        ObjectNode item = root.putArray("data").addObject();
+        item.put("last", last);
+        return root;
     }
 
     private static JsonNode response(String ordId, String sCode, String sMsg) {

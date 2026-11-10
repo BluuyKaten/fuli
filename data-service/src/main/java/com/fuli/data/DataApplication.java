@@ -11,7 +11,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @SpringBootApplication
 @EnableDiscoveryClient
-@MapperScan({"com.fuli.data.mapper", "com.fuli.data.crypto.mapper", "com.fuli.data.okx.mapper"})
+@MapperScan({"com.fuli.data.mapper", "com.fuli.data.crypto.mapper", "com.fuli.data.okx.mapper", "com.fuli.data.risk"})
 @EnableScheduling
 public class DataApplication {
     public static void main(String[] args) {
