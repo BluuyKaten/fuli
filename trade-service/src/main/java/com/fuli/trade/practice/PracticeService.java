@@ -14,15 +14,21 @@ import java.time.Instant;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-/** One database transaction owns every state transition. Market snapshots are insert-only. */
+/**
+ * One database transaction owns every state transition. Market snapshots are insert-only,
+ * so they are read through {@link PracticeSnapshotCache} instead of being re-read (and re-parsed)
+ * from {@code snapshot_json} on every mutation.
+ */
 @Service
 public class PracticeService {
     private final JdbcTemplate jdbc;
     private final PracticeSnapshotLoader loader;
+    private final PracticeSnapshotCache snapshots;
 
-    public PracticeService(JdbcTemplate jdbc, PracticeSnapshotLoader loader) {
+    public PracticeService(JdbcTemplate jdbc, PracticeSnapshotLoader loader, PracticeSnapshotCache snapshots) {
         this.jdbc = jdbc;
         this.loader = loader;
+        this.snapshots = snapshots;
     }
 
     @Transactional
@@ -35,6 +41,8 @@ public class PracticeService {
                 state.id, userId, state.stockCode, state.startDate, state.endDate,
                 currentDate(state), state.status, state.equity, state.initialCash,
                 state.version, JSON.toJSONString(state), JSON.toJSONString(snapshot), now, now);
+        // 刚建好的快照直接入缓存：前端创建后马上 GET 详情/列表，那一次不必再读大字段。
+        snapshots.put(state.id, snapshot);
         return PracticeEngine.view(state, snapshot);
     }
 
@@ -108,14 +116,33 @@ public class PracticeService {
 
     private Stored load(long userId, String id, boolean lock) {
         if (id == null || id.length() > 36) throw missing();
-        List<Stored> rows = jdbc.query("SELECT state_json,snapshot_json,version FROM practice_session WHERE id=? AND user_id=?" + (lock ? " FOR UPDATE" : ""),
+        // 只取决策状态，snapshot_json（几十 KB 的冻结 bars）不再随行一起读。
+        // FOR UPDATE 仍然锁住 practice_session 这一行，锁语义不变。
+        List<PracticeState> rows = jdbc.query("SELECT state_json,version FROM practice_session WHERE id=? AND user_id=?" + (lock ? " FOR UPDATE" : ""),
                 (rs, row) -> {
                     PracticeState state = JSON.parseObject(rs.getString("state_json"), PracticeState.class);
                     state.version = rs.getLong("version");
-                    return new Stored(state, JSON.parseObject(rs.getString("snapshot_json"), PracticeState.Snapshot.class));
+                    return state;
                 }, id, userId);
         if (rows.isEmpty()) throw missing();
-        return rows.get(0);
+        return new Stored(rows.get(0), snapshot(id));
+    }
+
+    /**
+     * 快照创建后不可变，命中缓存就不再碰数据库。
+     *
+     * <p>缓存未命中时单独读一列：此时上面那条 SELECT 已经确认会话存在且属于该用户，
+     * 事务里又持有行锁，不会有并发事务在两次读之间改写它。
+     */
+    private PracticeState.Snapshot snapshot(String id) {
+        PracticeState.Snapshot cached = snapshots.get(id);
+        if (cached != null) return cached;
+        List<String> rows = jdbc.query("SELECT snapshot_json FROM practice_session WHERE id=?",
+                (rs, row) -> rs.getString("snapshot_json"), id);
+        if (rows.isEmpty()) throw missing();
+        PracticeState.Snapshot snapshot = JSON.parseObject(rows.get(0), PracticeState.Snapshot.class);
+        snapshots.put(id, snapshot);
+        return snapshot;
     }
 
     private static String currentDate(PracticeState state) {

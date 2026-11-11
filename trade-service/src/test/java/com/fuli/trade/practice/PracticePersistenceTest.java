@@ -29,7 +29,7 @@ import static org.mockito.Mockito.*;
 class PracticePersistenceTest {
     @Configuration
     @EnableTransactionManagement
-    @Import({PracticeService.class, PracticeSnapshotLoader.class})
+    @Import({PracticeService.class, PracticeSnapshotLoader.class, PracticeSnapshotCache.class})
     static class Config {
         @Bean DataSource dataSource() {
             return new DriverManagerDataSource("jdbc:h2:mem:practice_engine_persistence;DB_CLOSE_DELAY=-1;MODE=MySQL", "sa", "");
@@ -41,12 +41,14 @@ class PracticePersistenceTest {
 
     @Autowired PracticeService service;
     @Autowired JdbcTemplate jdbc;
+    @Autowired PracticeSnapshotCache snapshots;
     @Autowired DataFeignClient market;
 
     @BeforeEach
     void setUp() {
         jdbc.execute("CREATE TABLE IF NOT EXISTS practice_session(id VARCHAR(36) PRIMARY KEY,user_id BIGINT NOT NULL,stock_code VARCHAR(20),start_date VARCHAR(10),end_date VARCHAR(10),current_day VARCHAR(10),status VARCHAR(20),equity DECIMAL(18,2),initial_cash DECIMAL(18,2),version BIGINT NOT NULL,state_json LONGTEXT NOT NULL,snapshot_json LONGTEXT NOT NULL,created_at TIMESTAMP NOT NULL,updated_at TIMESTAMP NOT NULL)");
         jdbc.update("DELETE FROM practice_session");
+        snapshots.clear();
         reset(market);
         when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenReturn(List.of(
                 bar("20260105", "10", "10"), bar("20260106", "11", "12"), bar("20260107", "13", "13")));
@@ -59,13 +61,39 @@ class PracticePersistenceTest {
         var advanced = service.advance(1, initial.id(), new PracticeDtos.VersionRequest(ordered.version()));
         String originalSnapshot = snapshot(initial.id());
         when(market.getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class))).thenThrow(new IllegalStateException("No market calls after create"));
-        var restarted = new PracticeService(jdbc, new PracticeSnapshotLoader(market));
+        // 重启 = 新实例 + 新缓存：快照仍必须来自数据库里冻结的那一份。
+        var restarted = new PracticeService(jdbc, new PracticeSnapshotLoader(market), new PracticeSnapshotCache());
         assertEquals(advanced, restarted.get(1, initial.id()));
         assertEquals(originalSnapshot, snapshot(initial.id()));
         assertEquals(404, assertThrows(ResponseStatusException.class, () -> service.get(2, initial.id())).getStatusCode().value());
         assertTrue(service.list(2).isEmpty());
         assertEquals(1, service.list(1).size());
         verify(market, times(1)).getDailyData(anyString(), anyString(), anyString(), nullable(Integer.class));
+    }
+
+    @Test
+    void repeatedReadsAndMutationsStopReloadingTheImmutableSnapshotColumn() {
+        var initial = create();
+        // 新实例 + 空缓存，模拟「进程刚启动、缓存还没热」。
+        var recorded = new SqlRecordingJdbcTemplate(jdbc.getDataSource());
+        var cache = new PracticeSnapshotCache();
+        var instrumented = new PracticeService(recorded, new PracticeSnapshotLoader(market), cache);
+
+        assertEquals(initial, instrumented.get(1, initial.id()));
+        assertEquals(1, recorded.count("SELECT snapshot_json"));
+        int afterFirstRead = recorded.statements().size();
+
+        // 第二次读、下单、揭晓下一日都只该读 state_json，不再碰几十 KB 的 bars。
+        assertEquals(initial, instrumented.get(1, initial.id()));
+        var ordered = instrumented.order(1, initial.id(), new PracticeDtos.OrderRequest(initial.version(), "BUY", BigDecimal.valueOf(100)));
+        var advanced = instrumented.advance(1, initial.id(), new PracticeDtos.VersionRequest(ordered.version()));
+
+        assertEquals(1, recorded.count("SELECT snapshot_json"), recorded.statements().toString());
+        assertTrue(recorded.statements().size() > afterFirstRead);
+        assertEquals(1, cache.misses());
+        assertEquals(3, cache.hits());
+        // 行为不变：缓存只是省掉了读取，落库的 state 仍然完整可读。
+        assertEquals(advanced, new PracticeService(jdbc, new PracticeSnapshotLoader(market), new PracticeSnapshotCache()).get(1, initial.id()));
     }
 
     @Test
