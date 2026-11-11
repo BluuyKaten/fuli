@@ -55,7 +55,7 @@
         size="small"
         :loading="loading"
         :pagination="{ pageSize: 20, hideOnSinglePage: true }"
-        :scroll="{ x: 1240 }"
+        :scroll="{ x: 1310 }"
         :locale="{ emptyText: emptyText }"
       >
         <template #bodyCell="{ column, record }">
@@ -89,16 +89,24 @@
             <span class="mono dim">{{ fmtTime(record.createTime) }}</span>
           </template>
           <template v-else-if="column.key === 'actions'">
-            <a-button
-              v-if="record.status === 'new'"
-              type="primary"
-              size="small"
-              danger
-              :loading="executingId === record.id"
-              @click="openConfirm(record)"
-            >
-              确认执行
-            </a-button>
+            <a-space v-if="record.status === 'new'" :size="4">
+              <a-button
+                type="primary"
+                size="small"
+                danger
+                :loading="executingId === record.id"
+                @click="openConfirm(record)"
+              >
+                确认执行
+              </a-button>
+              <a-button
+                size="small"
+                :loading="rejectingId === record.id"
+                @click="openReject(record)"
+              >
+                拒绝
+              </a-button>
+            </a-space>
             <span v-else class="dim">已处理</span>
           </template>
         </template>
@@ -110,7 +118,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { executeOkxSuggestion, listOkxSuggestions, type OkxSuggestion } from '@/api/okx'
+import { executeOkxSuggestion, listOkxSuggestions, rejectOkxSuggestion, type OkxSuggestion } from '@/api/okx'
 import { fmtPercent, fmtQty, fmtTime, sideText, statusColor, statusText } from './suggestionFormat'
 
 const REFRESH_MS = 30_000
@@ -118,6 +126,7 @@ const REFRESH_MS = 30_000
 const rows = ref<OkxSuggestion[]>([])
 const loading = ref(false)
 const executingId = ref<number | null>(null)
+const rejectingId = ref<number | null>(null)
 const statusFilter = ref<'new' | 'executed' | 'all'>('new')
 const autoRefresh = ref(true)
 const lastLoadedAt = ref('-')
@@ -135,7 +144,7 @@ const columns = [
   { title: '状态', dataIndex: 'status', key: 'status', width: 96 },
   { title: '理由', dataIndex: 'reason', key: 'reason', ellipsis: true },
   { title: '创建时间', dataIndex: 'createTime', key: 'createTime', width: 165 },
-  { title: '操作', key: 'actions', width: 110, fixed: 'right' as const }
+  { title: '操作', key: 'actions', width: 178, fixed: 'right' as const }
 ]
 
 const filtered = computed(() => {
@@ -173,8 +182,8 @@ const stopTimer = () => {
 const startTimer = () => {
   stopTimer()
   timer = window.setInterval(() => {
-    // 正在执行或正在手动刷新时跳过，避免把刚点下去的状态刷掉
-    if (executingId.value === null && !loading.value) load()
+    // 正在处置或正在手动刷新时跳过，避免把刚点下去的按钮状态刷掉
+    if (executingId.value === null && rejectingId.value === null && !loading.value) load()
   }, REFRESH_MS)
 }
 
@@ -232,6 +241,41 @@ const handleExecute = async (record: OkxSuggestion) => {
     // 弹窗随之关闭，列表还在，用户按提示补齐权限后可以再点。
   } finally {
     executingId.value = null
+  }
+}
+
+/** 拒绝：不产生订单，只是把建议关掉，别让「待确认」永远清不掉 */
+const openReject = (record: OkxSuggestion) => {
+  Modal.confirm({
+    title: '拒绝这条建议单？',
+    width: 440,
+    content: h('div', {}, [
+      h(
+        'div',
+        { style: 'color:#8b93a7;margin-bottom:10px;line-height:1.7' },
+        '拒绝不会产生任何订单，状态将变为「已拒绝」，之后也不能再执行。'
+      ),
+      line('标的', record.instId),
+      line('方向', sideText(record.side)),
+      line('数量', fmtQty(record.sz))
+    ]),
+    okText: '确认拒绝',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: () => handleReject(record)
+  })
+}
+
+const handleReject = async (record: OkxSuggestion) => {
+  rejectingId.value = record.id
+  try {
+    await rejectOkxSuggestion(record.id)
+    message.success('已拒绝')
+    await load()
+  } catch {
+    // 同 handleExecute：错误提示走拦截器，这里只负责收尾
+  } finally {
+    rejectingId.value = null
   }
 }
 

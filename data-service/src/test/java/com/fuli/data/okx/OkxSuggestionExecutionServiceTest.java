@@ -88,4 +88,57 @@ class OkxSuggestionExecutionServiceTest {
         OkxSuggestionExecutionService svc = new OkxSuggestionExecutionService(mapper, mock(OkxTradeService.class));
         assertThrows(IllegalArgumentException.class, () -> svc.execute(USER, 100L));
     }
+
+    // ---------------------------------------------------------------- 人工否决
+
+    @Test
+    void rejectsSuggestionWithoutPlacingAnyOrder() {
+        OkxOrderSuggestionMapper mapper = mock(OkxOrderSuggestionMapper.class);
+        when(mapper.selectById(100L)).thenReturn(suggestion("new"));
+        OkxTradeService trade = mock(OkxTradeService.class);
+
+        OkxSuggestionExecutionService svc = new OkxSuggestionExecutionService(mapper, trade);
+        Map<String, Object> result = svc.reject(USER, 100L);
+
+        assertEquals("rejected", result.get("status"));
+
+        ArgumentCaptor<OkxOrderSuggestion> cap = ArgumentCaptor.forClass(OkxOrderSuggestion.class);
+        verify(mapper).updateById(cap.capture());
+        assertEquals("rejected", cap.getValue().getStatus());
+
+        // 否决绝不能碰交易链路——这是「Agent 只读」边界在人工侧的对应约束
+        verifyNoInteractions(trade);
+    }
+
+    @Test
+    void cannotRejectAfterExecuted() {
+        OkxOrderSuggestionMapper mapper = mock(OkxOrderSuggestionMapper.class);
+        when(mapper.selectById(100L)).thenReturn(suggestion("executed"));
+        OkxSuggestionExecutionService svc = new OkxSuggestionExecutionService(mapper, mock(OkxTradeService.class));
+        assertThrows(IllegalArgumentException.class, () -> svc.reject(USER, 100L));
+        verify(mapper, never()).updateById(any(OkxOrderSuggestion.class));
+    }
+
+    @Test
+    void cannotRejectOthersSuggestion() {
+        OkxOrderSuggestionMapper mapper = mock(OkxOrderSuggestionMapper.class);
+        OkxOrderSuggestion s = suggestion("new");
+        s.setUserId(8L);
+        when(mapper.selectById(100L)).thenReturn(s);
+        OkxSuggestionExecutionService svc = new OkxSuggestionExecutionService(mapper, mock(OkxTradeService.class));
+        assertThrows(IllegalArgumentException.class, () -> svc.reject(USER, 100L));
+        verify(mapper, never()).updateById(any(OkxOrderSuggestion.class));
+    }
+
+    @Test
+    void cannotExecuteTwiceAfterRejected() {
+        OkxOrderSuggestionMapper mapper = mock(OkxOrderSuggestionMapper.class);
+        when(mapper.selectById(100L)).thenReturn(suggestion("rejected"));
+        OkxTradeService trade = mock(OkxTradeService.class);
+        OkxSuggestionExecutionService svc = new OkxSuggestionExecutionService(mapper, trade);
+
+        // 否决过的单子不能再被执行——否则「拒绝」只是装饰
+        assertThrows(IllegalArgumentException.class, () -> svc.execute(USER, 100L));
+        verifyNoInteractions(trade);
+    }
 }

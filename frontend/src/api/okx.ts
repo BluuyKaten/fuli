@@ -132,3 +132,13 @@ export const executeOkxSuggestion = (id: number) =>
   request.post<any, { code: number; data: OkxSuggestionExecution }>(
     `/data/okx/suggestions/${id}/execute`
   )
+
+/**
+ * 人工否决一条建议单：不产生任何订单，只把状态推进到 `rejected`。
+ *
+ * 没有这个入口时，不打算执行的建议会永远挂在 `new`，「待确认」数量清不掉。
+ */
+export const rejectOkxSuggestion = (id: number) =>
+  request.post<any, { code: number; data: { suggestionId: number; status: string } }>(
+    `/data/okx/suggestions/${id}/reject`
+  )

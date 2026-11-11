@@ -58,4 +58,20 @@ public class OkxSuggestionController {
             return Result.error(400, e.getMessage());
         }
     }
+
+    /**
+     * 人工否决一条建议单（不产生任何订单，只把状态推进到 {@code rejected}）。
+     *
+     * <p>同样要求写权限：它改变的是「这条建议的处置结果」，与下单属于同一类操作。
+     * 没有这个入口时，不打算执行的建议会永远挂在 {@code new}，「待确认」清不掉。
+     */
+    @PostMapping("/{id}/reject")
+    public Result<Map<String, Object>> reject(HttpServletRequest request, @PathVariable("id") long id) {
+        try {
+            OkxPrincipal principal = authz.requireWrite(request, "rejectSuggestion", "suggestionId=" + id);
+            return Result.success(executionService.reject(principal.userId(), id));
+        } catch (IllegalArgumentException e) {
+            return Result.error(400, e.getMessage());
+        }
+    }
 }
