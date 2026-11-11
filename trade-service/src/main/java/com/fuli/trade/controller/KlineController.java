@@ -5,6 +5,7 @@ import com.fuli.common.api.util.StockCodeUtil;
 import com.fuli.trade.dto.KlineBarDTO;
 import com.fuli.trade.entity.ChartDrawing;
 import com.fuli.trade.entity.RealtimeQuote;
+import com.fuli.trade.market.KlinePeriods;
 import com.fuli.trade.mapper.ChartDrawingMapper;
 import com.fuli.trade.mapper.RealtimeQuoteMapper;
 import com.fuli.trade.service.StockDataRouterService;
@@ -31,31 +32,61 @@ public class KlineController {
     private final jakarta.servlet.http.HttpServletRequest request;
 
     /**
-     * 分钟 K 线
-     * GET /stock/minute?code=300750&period=5
+     * 分钟 K 线。
+     *
+     * <p>{@code code} 收完整符号（{@code 600519.SH} / {@code AAPL.US}）：早先这里先 pureCode 丢掉后缀，
+     * 数据源只能靠字面猜市场，美股直接被判非法、K 线恒为空。市场解析统一交给 StockCodeUtil。
+     *
+     * <p>GET /stock/minute?code=AAPL.US&period=5
      */
     @GetMapping("/minute")
     public Result<List<KlineBarDTO>> minute(
             @RequestParam String code,
             @RequestParam(defaultValue = "5") int period) {
-        // 东财要纯代码；解析只走 StockCodeUtil，不再本地 split
-        return Result.success(routerService.getMinuteData(StockCodeUtil.pureCode(code), period));
+        String symbol = StockCodeUtil.resolveOrNull(code);
+        if (symbol == null) {
+            return Result.error(400, "非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
+        }
+        return Result.success(routerService.getMinuteData(symbol, period));
     }
 
     /**
-     * 周 K 线
+     * 周 K 线。
      */
     @GetMapping("/weekly")
     public Result<List<KlineBarDTO>> weekly(@RequestParam String code) {
-        return Result.success(routerService.getWeeklyData(StockCodeUtil.pureCode(code)));
+        String symbol = StockCodeUtil.resolveOrNull(code);
+        if (symbol == null) {
+            return Result.error(400, "非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
+        }
+        return Result.success(routerService.getWeeklyData(symbol));
     }
 
     /**
-     * 月 K 线
+     * 月 K 线。
      */
     @GetMapping("/monthly")
     public Result<List<KlineBarDTO>> monthly(@RequestParam String code) {
-        return Result.success(routerService.getMonthlyData(StockCodeUtil.pureCode(code)));
+        String symbol = StockCodeUtil.resolveOrNull(code);
+        if (symbol == null) {
+            return Result.error(400, "非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
+        }
+        return Result.success(routerService.getMonthlyData(symbol));
+    }
+
+    /**
+     * 该标的可用的 K 线周期（服务端下发，前端不再硬编码）。
+     *
+     * <p>返回 {@code market} / {@code defaultPeriod} / {@code timezone} / {@code periods}。
+     * {@code timezone} 是时间轴的显示口径（美股也是北京时间），前端据此标注。
+     */
+    @GetMapping("/periods")
+    public Result<Map<String, Object>> periods(@RequestParam String code) {
+        String symbol = StockCodeUtil.resolveOrNull(code);
+        if (symbol == null) {
+            return Result.error(400, "非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
+        }
+        return Result.success(KlinePeriods.describe(symbol));
     }
 
     /**
@@ -69,7 +100,7 @@ public class KlineController {
     public Result<Map<String, Object>> quote(@RequestParam String code) {
         String tushareCode = StockCodeUtil.resolveOrNull(code);
         if (tushareCode == null) {
-            return Result.error("非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
+            return Result.error(400, "非法的标的符号：" + code + "；美股/加密必须带市场后缀（如 AAPL.US）");
         }
 
         RealtimeQuote quote = realtimeQuoteMapper.selectById(tushareCode);

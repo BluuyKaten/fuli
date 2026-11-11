@@ -12,6 +12,9 @@
         >{{ p.label }}</button>
       </div>
 
+      <!-- 时间轴口径：美股也是北京时间，不标注会被当成数据错误 -->
+      <span v-if="timezoneHint" class="tz-hint" title="数据源统一返回北京时间">时间：{{ timezoneHint }}</span>
+
       <!-- 指标选择器 -->
       <div class="indicator-group">
         <label v-for="ind in indicatorList" :key="ind.key" class="indicator-label">
@@ -150,7 +153,9 @@ import {
   getStockMonthlyData,
   getStockDailyData,
   getStockSparkline,
-  saveDrawing
+  getStockPeriods,
+  saveDrawing,
+  type KlinePeriod
 } from '@/api/kline'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import SparklineStrip from '@/components/chart/SparklineStrip.vue'
@@ -238,17 +243,25 @@ const { panelData, subscribeCrosshair, unsubscribeCrosshair } = useInfoPanel(
   activeIndicators
 )
 
-// --- 周期选项 ---
-const periods = [
-  { label: '1分', value: '1' },
-  { label: '5分', value: '5' },
-  { label: '15分', value: '15' },
-  { label: '60分', value: '60' },
-  { label: '日线', value: '1D' },
-  { label: '周线', value: '1W' },
-  { label: '月线', value: '1M' }
+// --- 周期选项：服务端下发，这里只是接口不可用时的兜底 ---
+// 兜底不能省：/stock/periods 挂了不该让整张图不可用，至少日线要能出。
+const FALLBACK_PERIODS: KlinePeriod[] = [
+  { value: '1', label: '1分', kind: 'minute' },
+  { value: '5', label: '5分', kind: 'minute' },
+  { value: '15', label: '15分', kind: 'minute' },
+  { value: '30', label: '30分', kind: 'minute' },
+  { value: '60', label: '60分', kind: 'minute' },
+  { value: '1D', label: '日线', kind: 'day' },
+  { value: '1W', label: '周线', kind: 'week' },
+  { value: '1M', label: '月线', kind: 'month' }
 ]
+const periods = ref<KlinePeriod[]>(FALLBACK_PERIODS)
 const currentPeriod = ref('1D')
+const market = ref('')
+const timezoneHint = ref('')
+
+/** 当前周期属于哪一类。所有「该调哪个端点」的判断都走这里，不再靠字符串 includes 猜。 */
+const periodKind = () => periods.value.find(p => p.value === currentPeriod.value)?.kind
 
 // --- 指标列表 ---
 const indicatorList: { key: keyof IndicatorConfig; label: string }[] = [
@@ -567,7 +580,7 @@ const barRange = (): { from: string; to: string } | undefined => {
  *    类型不同无法定位，因此分钟周期不显示成交标记。
  */
 const refreshAutoMarkers = async () => {
-  if (!['1D', '1W', '1M'].includes(currentPeriod.value)) {
+  if (!isDailyPeriod()) {
     clearAutoMarkers()
     return
   }
@@ -576,7 +589,10 @@ const refreshAutoMarkers = async () => {
   await loadAutoMarkers(props.stockCode, barRange())
 }
 
-const isDailyPeriod = () => ['1D', '1W', '1M'].includes(currentPeriod.value)
+const isDailyPeriod = () => {
+  const kind = periodKind()
+  return kind !== undefined && kind !== 'minute'
+}
 
 /** 后端原始 bar → 图表 CandleItem。抽出来是为了首次加载和左滑加载共用同一套字段兜底。 */
 const toCandles = (data: RawKlineItem[], isDaily: boolean): CandleItem[] =>
@@ -700,15 +716,19 @@ const loadData = async () => {
     if (period === '1D') {
       const res = await getStockDailyData(code, { limit: DAILY_WINDOW + DAILY_LOOKBACK })
       data = res.data || []
-    } else if (['1', '5', '15', '60'].includes(period)) {
-      const res = await getStockMinuteData(props.stockCode, parseInt(period))
+    } else if (periodKind() === 'minute') {
+      const res = await getStockMinuteData(props.stockCode, parseInt(period, 10))
       data = res.data || []
-    } else if (period === '1W') {
+    } else if (periodKind() === 'week') {
       const res = await getStockWeeklyData(props.stockCode)
       data = res.data || []
-    } else if (period === '1M') {
+    } else if (periodKind() === 'month') {
       const res = await getStockMonthlyData(props.stockCode)
       data = res.data || []
+    } else {
+      // 周期不在下发列表里（理论上不会发生）。不静默画空图：那会让人以为「没数据」。
+      message.warning(`不支持的周期：${period}`)
+      return
     }
 
     // 转换为 Lightweight Charts 格式
@@ -864,6 +884,8 @@ watch(() => props.stockCode, async () => {
     drawings.value = [] // 立即清空画线
     selectedId.value = null
     redraw()
+    // 换标的后周期集合/时区口径都可能变（A 股 ↔ 美股），先刷新再取数
+    await loadPeriods()
     await loadData()
     await nextTick() // 等待 K 线图渲染
     loadDrawings(props.stockCode, currentPeriod.value)
@@ -872,6 +894,35 @@ watch(() => props.stockCode, async () => {
 })
 
 // --- 生命周期：挂载 ---
+/**
+ * 拉取该标的可用周期（服务端下发）。
+ *
+ * <p>失败时保持兜底列表——周期接口挂了不该让整张图不可用，这是刻意的降级。
+ */
+const loadPeriods = async () => {
+  try {
+    const meta = (await getStockPeriods(props.stockCode)).data
+    const list = meta?.periods
+    if (!Array.isArray(list) || list.length === 0) return
+
+    periods.value = list
+    market.value = meta.market || ''
+    // 美股分钟线也是北京时间（东财口径）。不标注的话，用户看到 22:30 开盘会以为数据错了。
+    if (meta.market === 'US' && meta.timezone) {
+      timezoneHint.value = meta.timezone === 'Asia/Shanghai' ? '北京时间' : meta.timezone
+    } else {
+      timezoneHint.value = ''
+    }
+
+    if (!list.some(p => p.value === currentPeriod.value)) {
+      const fallback = meta.defaultPeriod
+      currentPeriod.value = list.some(p => p.value === fallback) ? fallback : list[0].value
+    }
+  } catch {
+    // 用兜底列表继续，不打断看图
+  }
+}
+
 onMounted(() => {
   if (!chartContainer.value) return
 
@@ -896,7 +947,9 @@ onMounted(() => {
   // 加载数据
   // 标记必须在数据落地之后再加载：loadAutoMarkers 依赖 barRange() 过滤越界点，
   // 提前调用会拿到空范围，等于不过滤，反而让越界标记进入 series。
-  loadData().then(() => refreshAutoMarkers())
+  loadPeriods().then(() => {
+    loadData().then(() => refreshAutoMarkers())
+  })
   loadDrawings(props.stockCode, currentPeriod.value)
 
   // 监听键盘删除事件
@@ -991,6 +1044,14 @@ const saveDrawingsOnUnmount = () => {
 .period-group {
   display: flex;
   gap: 2px;
+}
+
+/* 时间轴口径提示（目前只在美股出现：北京时间 22:30 开盘，不标注像数据错了） */
+.tz-hint {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--term-fg-dim);
+  white-space: nowrap;
 }
 
 .period-btn {

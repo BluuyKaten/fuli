@@ -46,8 +46,8 @@ public class StockDataRouterService {
 
     private final Map<String, MinuteCacheEntry> minuteCache = new ConcurrentHashMap<>();
 
-    public List<KlineBarDTO> getMinuteData(String stockCode, int period) {
-        String key = stockCode + ':' + period;
+    public List<KlineBarDTO> getMinuteData(String symbol, int period) {
+        String key = symbol + ':' + period;
         long now = System.currentTimeMillis();
         MinuteCacheEntry cached = minuteCache.get(key);
 
@@ -56,8 +56,8 @@ public class StockDataRouterService {
         }
 
         List<KlineBarDTO> data = routeWithFallback(
-                ds -> ds.getMinuteData(stockCode, period),
-                String.format("分钟线 %s period=%d", stockCode, period)
+                ds -> ds.getMinuteData(symbol, period),
+                String.format("分钟线 %s period=%d", symbol, period)
         );
 
         if (data.isEmpty()) {
@@ -79,17 +79,17 @@ public class StockDataRouterService {
         return immutable;
     }
 
-    public List<KlineBarDTO> getWeeklyData(String stockCode) {
+    public List<KlineBarDTO> getWeeklyData(String symbol) {
         return routeWithFallback(
-                ds -> ds.getWeeklyData(stockCode),
-                String.format("周线 %s", stockCode)
+                ds -> ds.getWeeklyData(symbol),
+                String.format("周线 %s", symbol)
         );
     }
 
-    public List<KlineBarDTO> getMonthlyData(String stockCode) {
+    public List<KlineBarDTO> getMonthlyData(String symbol) {
         return routeWithFallback(
-                ds -> ds.getMonthlyData(stockCode),
-                String.format("月线 %s", stockCode)
+                ds -> ds.getMonthlyData(symbol),
+                String.format("月线 %s", symbol)
         );
     }
 
