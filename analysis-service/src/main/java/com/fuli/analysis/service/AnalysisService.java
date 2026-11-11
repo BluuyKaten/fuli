@@ -194,6 +194,7 @@ public class AnalysisService {
         // 6. 按日期遍历，计算每日总资产（现金 + 持仓市值）
         Map<String, Integer> holdings = new HashMap<>();  // stockCode -> quantity
         Map<String, BigDecimal> avgCosts = new HashMap<>(); // stockCode -> avgCost
+        Map<String, BigDecimal> lastClose = new HashMap<>(); // stockCode -> 最近一个已知收盘价
         BigDecimal cash = getInitialCash(userId); // 现金余额（从初始资金起算）
 
         // 按交易日期分组
@@ -246,11 +247,9 @@ public class AnalysisService {
                 if (quantity <= 0) continue;
 
                 hasHolding = true;
-                // 获取当日收盘价，如果没有行情数据则使用平均成本
-                BigDecimal closePrice = stockDailyPrices
-                        .getOrDefault(stockCode, Collections.emptyMap())
-                        .getOrDefault(currentDate, avgCosts.getOrDefault(stockCode, BigDecimal.ZERO));
-                dailyAsset = dailyAsset.add(closePrice.multiply(BigDecimal.valueOf(quantity)));
+                dailyAsset = dailyAsset.add(closeOnOrBefore(stockCode, currentDate, stockDailyPrices, lastClose,
+                        avgCosts.getOrDefault(stockCode, BigDecimal.ZERO))
+                        .multiply(BigDecimal.valueOf(quantity)));
             }
 
             // 只在有交易或持仓时记录
@@ -305,6 +304,26 @@ public class AnalysisService {
 
     /** 某只股票需要行情的日期闭区间（含两端）。 */
     private record PriceWindow(LocalDate from, LocalDate to) {}
+
+    /**
+     * 持仓估值价：优先当日收盘价；当天没有 K 线（周末／节假日／停牌）时沿用最近一个已知收盘价。
+     *
+     * <p>改动前这里直接退化为「平均成本」。周末必然没有 K 线，于是资产曲线每逢周末就跌回成本、
+     * 下周一再弹回来——看图的人会以为自己每周亏一次。持有市值应该按「最近一次成交价」估，
+     * 而不是按买入成本估。只有连一根历史收盘价都没有（例如当天建仓且当日无行情）才回退到成本。
+     */
+    private static BigDecimal closeOnOrBefore(String stockCode, LocalDate date,
+                                              Map<String, Map<LocalDate, BigDecimal>> prices,
+                                              Map<String, BigDecimal> lastClose,
+                                              BigDecimal fallback) {
+        BigDecimal close = prices.getOrDefault(stockCode, Collections.emptyMap()).get(date);
+        if (close != null) {
+            lastClose.put(stockCode, close);
+            return close;
+        }
+        BigDecimal carried = lastClose.get(stockCode);
+        return carried != null ? carried : fallback;
+    }
 
     /** 获取初始资金（资产曲线起算基准），失败时回退到注册默认值。 */
     private BigDecimal getInitialCash(Long userId) {

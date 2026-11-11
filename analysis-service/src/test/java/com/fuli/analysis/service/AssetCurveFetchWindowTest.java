@@ -67,11 +67,31 @@ class AssetCurveFetchWindowTest {
         stub(() -> fixture);
 
         Map<String, Object> actual = analysisService.getAssetCurve(USER, null, LocalDate.of(2026, 2, 10));
-        Map<String, Object> legacy = legacyCurve(fixture, LocalDate.of(2026, 2, 10));
+        Map<String, Object> reference = referenceCurve(fixture, LocalDate.of(2026, 2, 10));
 
-        assertEquals(legacy.get("dates"), actual.get("dates"));
-        assertEquals(legacy.get("assets"), actual.get("assets"));
+        assertEquals(reference.get("dates"), actual.get("dates"));
+        assertEquals(reference.get("assets"), actual.get("assets"));
         assertFalse(((List<?>) actual.get("dates")).isEmpty(), "空曲线会让这条对拍失去意义");
+    }
+
+    @Test
+    void nonTradingDaysKeepTheLastCloseInsteadOfFallingBackToCost() {
+        stub(this::defaultTrades);
+
+        Map<String, Object> curve = analysisService.getAssetCurve(USER, null, LocalDate.of(2026, 2, 10));
+        List<?> dates = (List<?>) curve.get("dates");
+        List<?> assets = (List<?>) curve.get("assets");
+        // 02-06（周五）000001.SZ 收盘 11 → 99100 + 200×11 = 101300。
+        // 02-07/02-08 是周末、没有 K 线：应沿用 101300，而不是掉回成本价 100100。
+        for (String date : List.of("2026-02-06", "2026-02-07", "2026-02-08")) {
+            int index = dates.indexOf(date);
+            assertTrue(index >= 0, "缺少日期 " + date);
+            assertEquals(0, new BigDecimal("101300.00").compareTo((BigDecimal) assets.get(index)),
+                    date + " 的持仓市值应按最近收盘价估，实际 " + assets.get(index));
+        }
+        // 周一恢复行情后继续按当日收盘价：99100 + 200×14 = 101900。
+        assertEquals(0, new BigDecimal("101900.00").compareTo(
+                (BigDecimal) assets.get(dates.indexOf("2026-02-09"))));
     }
 
     /** 600519.SH 在 1 月初买入后清仓；000001.SZ 在 2 月买入并持有到 endDate。 */
@@ -128,8 +148,14 @@ class AssetCurveFetchWindowTest {
         return out;
     }
 
-    /** 改动前的实现，一字未改（除把取数抽成 directCall 便于在测试里复用）。 */
-    private Map<String, Object> legacyCurve(List<TradeVO> trades, LocalDate endDate) {
+    /**
+     * 参照实现：取数沿用**改动前**的「全账户最早交易日 → endDate」口径，估值与当前实现一致。
+     *
+     * <p>这样这条对拍只隔离「取数窗口」一个变量——如果窗口收窄漏掉了某个 quantity>0 的日期，
+     * 曲线就会和这里不一致。估值口径（周末沿用最近收盘价）由
+     * {@link #nonTradingDaysKeepTheLastCloseInsteadOfFallingBackToCost()} 单独钉住。
+     */
+    private Map<String, Object> referenceCurve(List<TradeVO> trades, LocalDate endDate) {
         if (trades.isEmpty()) {
             Map<String, Object> empty = new LinkedHashMap<>();
             empty.put("dates", List.of());
@@ -159,6 +185,7 @@ class AssetCurveFetchWindowTest {
 
         Map<String, Integer> holdings = new HashMap<>();
         Map<String, BigDecimal> avgCosts = new HashMap<>();
+        Map<String, BigDecimal> lastClose = new HashMap<>();
         BigDecimal cash = new BigDecimal("100000.00");
         Map<LocalDate, List<TradeVO>> tradesByDate = trades.stream()
                 .collect(Collectors.groupingBy(TradeVO::getTradeDate, TreeMap::new, Collectors.toList()));
@@ -200,7 +227,15 @@ class AssetCurveFetchWindowTest {
                 hasHolding = true;
                 BigDecimal closePrice = stockDailyPrices
                         .getOrDefault(entry.getKey(), Map.of())
-                        .getOrDefault(currentDate, avgCosts.getOrDefault(entry.getKey(), BigDecimal.ZERO));
+                        .get(currentDate);
+                if (closePrice != null) {
+                    lastClose.put(entry.getKey(), closePrice);
+                } else {
+                    closePrice = lastClose.get(entry.getKey());
+                }
+                if (closePrice == null) {
+                    closePrice = avgCosts.getOrDefault(entry.getKey(), BigDecimal.ZERO);
+                }
                 dailyAsset = dailyAsset.add(closePrice.multiply(BigDecimal.valueOf(entry.getValue())));
             }
             if (todayTrades != null || hasHolding) {
