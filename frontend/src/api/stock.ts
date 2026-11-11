@@ -25,6 +25,37 @@ export const syncAllIncremental = (startDate?: string, endDate?: string) =>
 export const getSyncStatus = (tsCode: string) =>
   request.get<any, { code: number; data: SyncStatusVO }>('/data/tushare/sync/status', { params: { tsCode } })
 
+/** 美股同步的单标的結果 */
+export interface UsSyncResult {
+  symbol: string
+  success: boolean
+  /** 落库日线根数（成功时） */
+  count?: number
+  /** 失败原因（失败时） */
+  message?: string
+}
+
+export interface UsSyncBatchData {
+  /** 本次使用的数据源：tencent（前复权）/ eastmoney（原始价 + 因子） */
+  source: string
+  total: number
+  succeeded: number
+  results: UsSyncResult[]
+}
+
+/** 同步单个美股标的 */
+export const syncUsSymbol = (symbol: string) =>
+  request.post<any, { code: number; data: number }>('/data/us/sync', { symbol }, { timeout: 180000 })
+
+/** 批量同步美股：逐标的返回结果，一只失败不影响其余 */
+export const syncUsBatch = (symbols: string[]) =>
+  request.post<any, { code: number; data: UsSyncBatchData }>(
+    '/data/us/sync-batch',
+    { symbols },
+    { timeout: 600000 }
+  )
+
+
 /** 持仓数量返回结构 */
 export interface HoldingQuantityVO {
   userId: number

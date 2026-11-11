@@ -14,14 +14,24 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Map;
 
 /**
- * 美股行情同步（阶段 1）：东财搜索校验 → 拉日线落 {@code bar} + 注册 {@code instrument} +
- * 计算复权因子落 {@code adj_factor}。
+ * 美股行情同步：解析代码 → 拉日线落 {@code bar} + 注册 {@code instrument}。
  *
- * <p>只同步手工录入清单内的标的（不拉全市场，见 {@code multi-market-rollout.md} 1.2/1.3）。
- * 日线 {@code ts} = 美股交易日 09:30（美东）转 UTC 秒，时区用 {@code America/New_York}
+ * <p>支持两个源，由 {@code us.market.source} 选择（默认 {@code tencent}）：
+ * <ul>
+ *   <li><b>tencent</b>：前复权日线，单次 1200 根、自动往回翻页补到 {@code history-years} 年；
+ *       <b>不写 adj_factor</b>（价格本身已经是前复权）。</li>
+ *   <li><b>eastmoney</b>：原始价 + fqt=0/fqt=1 求相对因子落 {@code adj_factor}（原实现）。</li>
+ * </ul>
+ *
+ * <p>为什么默认腾讯：东财 K 线主机在部分网络直接断连（见 ADR-0019），而腾讯同一台机器直连可用。
+ * 两个源口径不同，所以每次同步都是<b>先删后插</b>——只 upsert 会在换源时留下半段原始价、
+ * 半段复权价的序列，图上表现为断层，且很难归因。
+ *
+ * <p>日线 {@code ts} = 美股交易日 09:30（美东）转 UTC 秒，时区用 {@code America/New_York}
  * 由 JDK 自动处理夏令时/冬令时。
  */
 @Slf4j
@@ -29,26 +39,35 @@ import java.util.Map;
 public class UsSyncService {
 
     private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
+    private static final String PERIOD_DAILY = "1d";
 
-    private final EastMoneyUsDataSource dataSource;
+    private final EastMoneyUsDataSource eastMoney;
+    private final TencentUsDataSource tencent;
     private final BarMapper barMapper;
     private final InstrumentMapper instrumentMapper;
     private final AdjFactorMapper adjFactorMapper;
     private final DailyKlineCache klineCache;
     private final UsMarketProperties properties;
 
-    public UsSyncService(EastMoneyUsDataSource dataSource,
+    public UsSyncService(EastMoneyUsDataSource eastMoney,
+                         TencentUsDataSource tencent,
                          BarMapper barMapper,
                          InstrumentMapper instrumentMapper,
                          AdjFactorMapper adjFactorMapper,
                          DailyKlineCache klineCache,
                          UsMarketProperties properties) {
-        this.dataSource = dataSource;
+        this.eastMoney = eastMoney;
+        this.tencent = tencent;
         this.barMapper = barMapper;
         this.instrumentMapper = instrumentMapper;
         this.adjFactorMapper = adjFactorMapper;
         this.klineCache = klineCache;
         this.properties = properties;
+    }
+
+    /** 本次同步实际使用的数据源名，供接口回显与排障。 */
+    public String source() {
+        return "eastmoney".equalsIgnoreCase(properties.getSource()) ? "eastmoney" : "tencent";
     }
 
     /**
@@ -58,24 +77,55 @@ public class UsSyncService {
     public int sync(String symbolRaw) {
         String symbol = resolveUs(symbolRaw);
         String code = StockCodeUtil.pureCode(symbol);
+        return "eastmoney".equals(source())
+                ? syncFromEastMoney(symbol, code)
+                : syncFromTencent(symbol, code);
+    }
 
-        UsMarket.UsStockMatch match = dataSource.search(code);
+    // ---------------- 腾讯（默认） ----------------
+
+    private int syncFromTencent(String symbol, String code) {
+        UsMarket.UsStockMatch match = tencent.search(code);
+        if (match == null) {
+            throw new IllegalArgumentException("腾讯未找到美股：" + code);
+        }
+        LocalDate since = LocalDate.now().minusYears(Math.max(1, properties.getHistoryYears()));
+        UsMarket.UsDailyResult raw = tencent.fetchDaily(match.quoteId(), since);
+        if (raw.candles().isEmpty()) {
+            throw new IllegalStateException("腾讯未返回 " + code + " 的日线（该标的是否已退市/停牌？）");
+        }
+
+        registerInstrument(symbol, match, raw.priceScale());
+        // 先删后插：换源时不能把两种复权口径混在一张表里。
+        int removedBars = barMapper.deleteBySymbol(symbol, PERIOD_DAILY);
+        // 前复权价再叠旧因子会被二次缩放，因子必须一起清掉。
+        adjFactorMapper.deleteBySymbol(symbol);
+
+        int count = writeBars(symbol, raw.candles());
+        evict(symbol);
+        log.info("美股同步完成(tencent/前复权): {} ({}) {} 根，替换旧 {} 根",
+                symbol, match.name(), count, removedBars);
+        return count;
+    }
+
+    // ---------------- 东财（原始价 + 因子） ----------------
+
+    private int syncFromEastMoney(String symbol, String code) {
+        UsMarket.UsStockMatch match = eastMoney.search(code);
         if (match == null) {
             throw new IllegalArgumentException("东财未找到美股：" + code);
         }
 
-        UsMarket.UsDailyResult raw = dataSource.fetchDaily(match.quoteId(), false);
+        UsMarket.UsDailyResult raw = eastMoney.fetchDaily(match.quoteId(), false);
         registerInstrument(symbol, match, raw.priceScale());
 
-        int count = 0;
-        for (UsMarket.UsCandle candle : raw.candles()) {
-            barMapper.upsert(toBar(symbol, candle));
-            count++;
-        }
+        int removedBars = barMapper.deleteBySymbol(symbol, PERIOD_DAILY);
+        int count = writeBars(symbol, raw.candles());
 
         // 复权因子：fqt=1 / fqt=0 求相对因子（消除拆股假阴线）
         try {
-            UsMarket.UsDailyResult fwd = dataSource.fetchDaily(match.quoteId(), true);
+            adjFactorMapper.deleteBySymbol(symbol);
+            UsMarket.UsDailyResult fwd = eastMoney.fetchDaily(match.quoteId(), true);
             Map<LocalDate, BigDecimal> factors = UsAdjustFactor.compute(raw.candles(), fwd.candles());
             for (Map.Entry<LocalDate, BigDecimal> e : factors.entrySet()) {
                 AdjFactor af = new AdjFactor();
@@ -89,11 +139,26 @@ public class UsSyncService {
             log.warn("美股复权因子计算失败: {} ({})", symbol, e.getMessage());
         }
 
-        if (count > 0) {
-            klineCache.evict(symbol, "1d");
-        }
-        log.info("美股同步完成: {} ({}) {} 根", symbol, match.name(), count);
+        evict(symbol);
+        log.info("美股同步完成(eastmoney/原始价): {} ({}) {} 根，替换旧 {} 根",
+                symbol, match.name(), count, removedBars);
         return count;
+    }
+
+    /** 逐根写库；{@code preClose} 用上一根的收盘（首根留空，不臆造）。 */
+    private int writeBars(String symbol, List<UsMarket.UsCandle> candles) {
+        int count = 0;
+        BigDecimal previousClose = null;
+        for (UsMarket.UsCandle candle : candles) {
+            barMapper.upsert(toBar(symbol, candle, previousClose));
+            previousClose = candle.close();
+            count++;
+        }
+        return count;
+    }
+
+    private void evict(String symbol) {
+        klineCache.evict(symbol, PERIOD_DAILY);
     }
 
     private void registerInstrument(String symbol, UsMarket.UsStockMatch match, int priceScale) {
@@ -112,16 +177,16 @@ public class UsSyncService {
         instrumentMapper.upsert(ins);
     }
 
-    private Bar toBar(String symbol, UsMarket.UsCandle candle) {
+    private Bar toBar(String symbol, UsMarket.UsCandle candle, BigDecimal previousClose) {
         Bar bar = new Bar();
         bar.setInstrumentCode(symbol);
-        bar.setPeriod("1d");
+        bar.setPeriod(PERIOD_DAILY);
         bar.setTs(toUsTs(candle.date()));
         bar.setOpenPrice(candle.open());
         bar.setHighPrice(candle.high());
         bar.setLowPrice(candle.low());
         bar.setClosePrice(candle.close());
-        bar.setPreClose(null);
+        bar.setPreClose(previousClose);
         bar.setVolume(candle.volume());
         bar.setAmount(candle.amount());
         return bar;

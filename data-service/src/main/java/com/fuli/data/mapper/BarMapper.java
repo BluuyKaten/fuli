@@ -1,6 +1,7 @@
 package com.fuli.data.mapper;
 
 import com.fuli.data.entity.Bar;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -93,6 +94,16 @@ public interface BarMapper {
 
     @Select("SELECT COUNT(*) FROM bar WHERE instrument_code = #{symbol} AND period = #{period}")
     long countBySymbol(@Param("symbol") String symbol, @Param("period") String period);
+
+    /**
+     * 整体清空某标的某周期。
+     *
+     * <p>美股同步用「先删后插」而不是纯 upsert：不同数据源的复权口径不同（腾讯只有前复权、
+     * 东财原始价 + 因子），只 upsert 会在切换源时留下两种口径混在一起的序列——
+     * 同一天的收盘价一半是原始价、一半是复权价，图上看起来像断层，而且很难归因。
+     */
+    @Delete("DELETE FROM bar WHERE instrument_code = #{symbol} AND period = #{period}")
+    int deleteBySymbol(@Param("symbol") String symbol, @Param("period") String period);
 
     /**
      * 幂等 upsert：主键冲突时以新值覆盖。入参已是股/元口径。

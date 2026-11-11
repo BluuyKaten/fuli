@@ -20,12 +20,18 @@ public class StockDataRouterService {
 
     private final List<StockDataSource> dataSources;
 
-    // 主数据源：当前仅实现 EastMoney 一个数据源（分钟/周/月线）。
-    // 原设计「主源 Tushare 失败切 EastMoney」中的 Tushare 数据源尚未实现，
-    // findSource("Tushare") 恒为 null 是死分支，因此主源直接指向 EastMoney。
-    // 待后续接入 Tushare 分钟/周/月线源时，可把 PRIMARY_SOURCE 改回 "Tushare"。
-    private static final String PRIMARY_SOURCE = "EastMoney";
-    private static final String SECONDARY_SOURCE = "EastMoney";
+    // 数据源优先级按市场区分：
+    // - 美股：腾讯优先。东财 K 线主机在部分网络直接断连（ADR-0019），先试它等于每次看图都先等一次超时。
+    // - A 股：仍只走东财。腾讯 A 股的复权口径没在这里验证过，接管会让老用户的图静默变样。
+    // 原设计里的 Tushare 源尚未实现，所以不再保留 PRIMARY/SECONDARY 两个常量。
+    private static final String TENCENT_SOURCE = "Tencent";
+    private static final String EASTMONEY_SOURCE = "EastMoney";
+
+    private List<String> sourceOrder(String symbol) {
+        return "US".equals(com.fuli.common.api.util.StockCodeUtil.marketOf(symbol))
+                ? List.of(TENCENT_SOURCE, EASTMONEY_SOURCE)
+                : List.of(EASTMONEY_SOURCE);
+    }
 
     /**
      * 分钟线缓存 TTL。
@@ -55,7 +61,7 @@ public class StockDataRouterService {
             return cached.bars();
         }
 
-        List<KlineBarDTO> data = routeWithFallback(
+        List<KlineBarDTO> data = routeWithFallback(symbol,
                 ds -> ds.getMinuteData(symbol, period),
                 String.format("分钟线 %s period=%d", symbol, period)
         );
@@ -80,52 +86,44 @@ public class StockDataRouterService {
     }
 
     public List<KlineBarDTO> getWeeklyData(String symbol) {
-        return routeWithFallback(
+        return routeWithFallback(symbol,
                 ds -> ds.getWeeklyData(symbol),
                 String.format("周线 %s", symbol)
         );
     }
 
     public List<KlineBarDTO> getMonthlyData(String symbol) {
-        return routeWithFallback(
+        return routeWithFallback(symbol,
                 ds -> ds.getMonthlyData(symbol),
                 String.format("月线 %s", symbol)
         );
     }
 
-    private List<KlineBarDTO> routeWithFallback(
-            java.util.function.Function<StockDataSource, List<KlineBarDTO>> fetcher,
-            String operation) {
+    private List<KlineBarDTO> routeWithFallback(String symbol,
+                                                java.util.function.Function<StockDataSource, List<KlineBarDTO>> fetcher,
+                                                String operation) {
 
-        // 1. 尝试主源
-        StockDataSource primary = findSource(PRIMARY_SOURCE);
-        if (primary != null && primary.isAvailable()) {
+        List<String> order = sourceOrder(symbol);
+        for (int i = 0; i < order.size(); i++) {
+            StockDataSource source = findSource(order.get(i));
+            if (source == null || !source.isAvailable()) {
+                continue;
+            }
             try {
-                List<KlineBarDTO> data = fetcher.apply(primary);
+                List<KlineBarDTO> data = fetcher.apply(source);
                 if (!data.isEmpty()) {
-                    log.debug("[主源-{}] 获取 {} 条数据", primary.getName(), data.size());
+                    if (i > 0) {
+                        // 备用源命中要留痕：主源已经不可用一段时间了，日志里得能看出来。
+                        log.info("[备用源-{}] {} 取到 {} 条", source.getName(), operation, data.size());
+                    }
                     return data;
                 }
             } catch (Exception e) {
-                log.warn("[主源-{}] {} 失败: {}", primary.getName(), operation, e.getMessage());
+                log.warn("[{}-{}] {} 失败: {}", i == 0 ? "主源" : "备用源",
+                        source.getName(), operation, e.getMessage());
             }
         }
 
-        // 2. 尝试备用源
-        StockDataSource secondary = findSource(SECONDARY_SOURCE);
-        if (secondary != null && secondary.isAvailable()) {
-            try {
-                List<KlineBarDTO> data = fetcher.apply(secondary);
-                if (!data.isEmpty()) {
-                    log.info("[备用源-{}] 获取 {} 条数据", secondary.getName(), data.size());
-                    return data;
-                }
-            } catch (Exception e) {
-                log.warn("[备用源-{}] {} 失败: {}", secondary.getName(), operation, e.getMessage());
-            }
-        }
-
-        // 3. 所有源都失败
         log.error("[路由] {} 所有数据源均失败", operation);
         return new java.util.ArrayList<>();
     }

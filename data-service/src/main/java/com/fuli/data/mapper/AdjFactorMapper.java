@@ -1,6 +1,7 @@
 package com.fuli.data.mapper;
 
 import com.fuli.data.entity.AdjFactor;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -36,4 +37,13 @@ public interface AdjFactorMapper {
 
     @Select("SELECT COUNT(*) FROM adj_factor WHERE instrument_code = #{symbol}")
     long countBySymbol(@Param("symbol") String symbol);
+
+    /**
+     * 清空某标的的复权因子。
+     *
+     * <p>美股换源时必须清：腾讯只有前复权、不产出因子，若留着东财时代写下的因子，
+     * {@code adjust=forward} 会把已经是前复权的价格再乘一遍，整体缩放成一条错误的曲线。
+     */
+    @Delete("DELETE FROM adj_factor WHERE instrument_code = #{symbol}")
+    int deleteBySymbol(@Param("symbol") String symbol);
 }

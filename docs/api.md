@@ -247,7 +247,8 @@ Caffeine 缓存（不同时间区间是不同 key）。
 ## 5. data-service 行情与同步（8084）
 
 `data_db` 的唯一属主：`instrument`（标的主数据）、`bar`（统一 K 线）、`adj_factor`、OKX 相关表。
-上游有 Tushare（A 股）、东财（美股/A 股实时）、Binance Vision + Gate（加密）、OKX（加密）。
+上游有 Tushare（A 股）、腾讯财经（美股日线，默认）、东财（美股/A 股实时，部分网络不可达）、
+Binance Vision + Gate（加密）、OKX（加密）。
 
 ### 5.1 统一 K 线契约 `MarketBarsController`（网关前缀 `/api/market`）
 
@@ -299,7 +300,13 @@ Caffeine 缓存（不同时间区间是不同 key）。
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | POST | /data/crypto/sync | 用户 JWT | 加密 K 线：`{symbol, interval(默认 1d), from, to}`。Binance Vision 主源 + Gate 备用 |
-| POST | /data/us/sync | 用户 JWT | 美股日线：`{symbol:"AAPL.US"}`。东财 suggest 解析 secid + 前复权因子 |
+| POST | /data/us/sync | 用户 JWT | 美股日线：`{symbol:"AAPL.US"}`，返回落库根数。默认源腾讯（前复权，约 14 年），`us.market.source=eastmoney` 可切回东财（原始价 + 因子） |
+| POST | /data/us/sync-batch | 用户 JWT | 批量同步：`{symbols:["AAPL.US","MSFT.US"]}` 或 `{symbols:"AAPL.US,MSFT.US"}`，一次最多 30 个。逐标的返回 `{symbol, success, count \| message}`，一只失败不影响其余 |
+| GET | /data/us/source | 用户 JWT | 当前生效的美股数据源（`tencent` / `eastmoney`），排障先看这个 |
+
+> **美股口径**：腾讯只有前复权（`qfq`），所以 `bar` 存的就是前复权价，不产出 `adj_factor`——
+> `adjust=forward` 对美股不改变数值。每次同步都是**先删后插**（换源时两种口径不会混在一条序列里）。
+> 分钟线没有美股源：东财 K 线主机在部分网络不可达，腾讯不提供历史分钟线。详见 `docs/adr/0019-us-market-data-source.md`。
 
 ---
 

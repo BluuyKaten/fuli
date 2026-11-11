@@ -132,6 +132,64 @@
             />
           </a-space>
         </a-tab-pane>
+        <a-tab-pane key="us" tab="美股">
+          <a-space direction="vertical" style="width: 100%">
+            <a-alert
+              type="info"
+              show-icon
+              description="数据源：腾讯财经（前复权日线，单标的约 3600 根 / 14 年，无需 Key）。同步后日/周/月线都能看；分钟线暂不支持（腾讯不提供美股历史分钟线）。"
+            />
+
+            <div>
+              <div class="us-preset-label">常用标的（点选，可多选）</div>
+              <a-space wrap size="small" style="margin-top: 6px">
+                <a-tag
+                  v-for="item in usPresets"
+                  :key="item"
+                  :color="usSelected.includes(item) ? 'blue' : 'default'"
+                  style="cursor: pointer; user-select: none"
+                  @click="toggleUsPreset(item)"
+                >
+                  {{ item }}
+                </a-tag>
+              </a-space>
+            </div>
+
+            <a-textarea
+              v-model:value="usSymbols"
+              :rows="2"
+              placeholder="也可以直接粘贴，逗号或换行分隔，例如：AAPL.US, MSFT.US（必须带 .US 后缀）"
+            />
+
+            <a-space>
+              <a-button type="primary" :loading="syncingUs" @click="handleSyncUs">
+                <template #icon><CloudUploadOutlined /></template>
+                同步美股
+              </a-button>
+              <span class="us-hint">同步会整段替换该标的的历史（切换数据源时口径才不会被混在一起）</span>
+            </a-space>
+
+            <a-table
+              v-if="usResults.length"
+              :columns="usColumns"
+              :data-source="usResults"
+              :pagination="false"
+              row-key="symbol"
+              size="small"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'status'">
+                  <a-tag :color="record.success ? 'green' : 'red'">
+                    {{ record.success ? '成功' : '失败' }}
+                  </a-tag>
+                </template>
+                <template v-else-if="column.key === 'detail'">
+                  {{ record.success ? `${record.count} 根` : record.message }}
+                </template>
+              </template>
+            </a-table>
+          </a-space>
+        </a-tab-pane>
       </a-tabs>
     </a-card>
   </div>
@@ -141,7 +199,15 @@
 import { ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { CloudUploadOutlined } from '@ant-design/icons-vue'
-import { syncStockBasic, syncDailyByDate, syncDailyByRange, syncAllIncremental, getSyncStatus } from '@/api/stock'
+import {
+  syncStockBasic,
+  syncDailyByDate,
+  syncDailyByRange,
+  syncAllIncremental,
+  getSyncStatus,
+  syncUsBatch,
+  type UsSyncResult
+} from '@/api/stock'
 
 const activeTab = ref('auto')
 const syncingBasic = ref(false)
@@ -269,8 +335,62 @@ const handleCheckStatus = async () => {
   }
 }
 
-const getStatusColor = (status: string) => {
-  switch (status) {
+// ---------------- 美股 ----------------
+/** 常用标的：点一下就能同步，省得记后缀 */
+const usPresets = ['AAPL.US', 'MSFT.US', 'NVDA.US', 'TSLA.US', 'GOOGL.US',
+  'AMZN.US', 'META.US', 'SPY.US', 'QQQ.US', 'BABA.US']
+const usSelected = ref<string[]>([])
+const usSymbols = ref('')
+const syncingUs = ref(false)
+const usResults = ref<UsSyncResult[]>([])
+const usColumns = [
+  { title: '标的', dataIndex: 'symbol', key: 'symbol' },
+  { title: '结果', key: 'status', width: 90 },
+  { title: '详情', key: 'detail' }
+]
+
+const toggleUsPreset = (symbol: string) => {
+  const index = usSelected.value.indexOf(symbol)
+  if (index >= 0) {
+    usSelected.value.splice(index, 1)
+  } else {
+    usSelected.value.push(symbol)
+  }
+}
+
+const handleSyncUs = async () => {
+  const typed = usSymbols.value
+    .split(/[,，\s]+/)
+    .map((item) => item.trim().toUpperCase())
+    .filter(Boolean)
+  const symbols = Array.from(new Set([...usSelected.value, ...typed]))
+  if (symbols.length === 0) {
+    message.warning('请先选择或输入至少一个美股标的')
+    return
+  }
+  syncingUs.value = true
+  usResults.value = []
+  try {
+    const res = await syncUsBatch(symbols)
+    if (res.code === 200) {
+      usResults.value = res.data.results
+      const failed = res.data.total - res.data.succeeded
+      if (failed === 0) {
+        message.success(`${res.data.total} 个标的同步成功（数据源 ${res.data.source}）`)
+      } else {
+        message.warning(`成功 ${res.data.succeeded} 个，失败 ${failed} 个`)
+      }
+    } else {
+      message.error('同步失败')
+    }
+  } catch (error: any) {
+    message.error(error.message || '请求失败')
+  } finally {
+    syncingUs.value = false
+  }
+}
+
+const getStatusColor = (status: string) => {  switch (status) {
     case 'UP_TO_DATE': return 'green'
     case 'NEEDS_SYNC': return 'orange'
     case 'NO_DATA': return 'red'
@@ -289,6 +409,16 @@ const getStatusText = (status: string) => {
 </script>
 
 <style scoped>
+.us-preset-label {
+  font-size: 13px;
+  color: var(--text-secondary, #8b93a7);
+}
+
+.us-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #8b93a7);
+}
+
 .sync-container {
   width: 100%;
   height: 100%;
