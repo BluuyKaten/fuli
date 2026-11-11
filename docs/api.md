@@ -42,8 +42,10 @@
 - 路径任一 segment 等于 `internal` → 直接 403。外部调用根本到不了内部接口。
 - 限流：已认证按 userId（默认 20 令牌/秒，突发 60），登录 1/秒、注册 0.5/秒，超限 429 + `Retry-After`。
 
-服务侧不信任转发头：每个服务自己再验一遍签名（`BearerUserFilter` / `OkxAuthenticationFilter`），
-所以内网直连 808X 也必须带真令牌。
+服务侧不信任转发头：auth / trade / analysis / ai 各自再验一遍签名（`BearerUserFilter` 及其子类），
+data-service 的 `/data/okx/**` 与 MCP 路径由 `OkxAuthenticationFilter` 自己验签。
+例外是 data-service 的行情与同步路径（`/data/stock/**`、`/data/tushare/**`、`/data/crypto/**`、
+`/market/**`）：**它们只靠网关把关**——本表按「经网关调用」标注鉴权，内网直连 8084 这些路径不会再验签。
 
 ### 0.3 响应包装
 
