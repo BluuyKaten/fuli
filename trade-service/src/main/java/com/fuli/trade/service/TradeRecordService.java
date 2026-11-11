@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
@@ -39,6 +40,14 @@ public interface TradeRecordService extends IService<TradeRecord> {
     List<TradeVO> queryByCondition(TradeQueryDTO queryDTO);
 
     StatisticsVO getStatistics(TradeQueryDTO queryDTO);
+
+    /**
+     * 月度盈亏（SQL 分组聚合）：按月返回笔数、盈亏合计与胜率，供 analysis-service 直接转发。
+     *
+     * <p>此前由 analysis-service 拉全量交易后在内存里 stream 分组；区间一长就是几千行 Feign 载荷，
+     * 而结果最多几十行。口径与旧实现一致：只统计 {@code profit_loss} 非空的交易。
+     */
+    List<MonthlyProfitVO> getMonthlyProfit(TradeQueryDTO queryDTO);
 
     boolean clearAllByUserId(Long userId);
 

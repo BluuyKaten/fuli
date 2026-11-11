@@ -3,6 +3,7 @@ package com.fuli.trade.controller;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
@@ -111,6 +112,16 @@ public class TradeRecordController {
     public Result<StatisticsVO> internalStatistics(@RequestBody TradeQueryDTO queryDTO) {
         requireInternalUserId(queryDTO);
         return Result.success(tradeRecordService.getStatistics(queryDTO));
+    }
+
+    /**
+     * 月度盈亏聚合（服务间调用）。analysis-service 的 {@code /analysis/monthly-profit} 转这里，
+     * 不再把区间内全部交易拉过去在内存里分组。
+     */
+    @PostMapping("/internal/monthly-profit")
+    public Result<List<MonthlyProfitVO>> internalMonthlyProfit(@RequestBody TradeQueryDTO queryDTO) {
+        requireInternalUserId(queryDTO);
+        return Result.success(tradeRecordService.getMonthlyProfit(queryDTO));
     }
 
     @GetMapping("/internal/positions")

@@ -3,6 +3,7 @@ package com.fuli.common.api.feign;
 import com.fuli.common.api.Result;
 import com.fuli.common.api.dto.TradeDTO;
 import com.fuli.common.api.dto.TradeQueryDTO;
+import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
@@ -31,6 +32,12 @@ public interface TradeFeignClient {
 
     @PostMapping("/trade/internal/statistics")
     Result<StatisticsVO> getStatistics(@RequestBody TradeQueryDTO queryDTO);
+
+    /**
+     * 月度盈亏聚合（trade-service 内 GROUP BY 月份，只返回每月一行）。
+     */
+    @PostMapping("/trade/internal/monthly-profit")
+    Result<List<MonthlyProfitVO>> getMonthlyProfit(@RequestBody TradeQueryDTO queryDTO);
 
     @PostMapping("/trade/internal/queryByCondition")
     Result<List<TradeVO>> queryByCondition(@RequestBody TradeQueryDTO queryDTO);

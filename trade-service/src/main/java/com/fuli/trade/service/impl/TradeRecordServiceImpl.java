@@ -10,6 +10,7 @@ import com.fuli.common.api.exception.BusinessException;
 import com.fuli.common.api.feign.AuthFeignClient;
 import com.fuli.common.api.feign.DataFeignClient;
 import com.fuli.common.api.Result;
+import com.fuli.common.api.vo.MonthlyProfitVO;
 import com.fuli.common.api.vo.PositionVO;
 import com.fuli.common.api.vo.StatisticsVO;
 import com.fuli.common.api.vo.TradeVO;
@@ -370,6 +371,30 @@ public class TradeRecordServiceImpl extends com.baomidou.mybatisplus.spring.serv
         }
 
         return statistics;
+    }
+
+    /**
+     * 月度盈亏：SQL 分组聚合，口径与 analysis-service 原内存实现逐位一致。
+     *
+     * <p>胜率放在这里算而不是 SQL 里算：{@code winCount / tradeCount} 要保留 4 位、HALF_UP，
+     * 各数据库的除法精度与舍入规则不一致（MySQL 是 DIV 精度可调，H2 又不同），
+     * 用 BigDecimal 复算才能保证「同一个账户、同一份数据，改前改后一分不差」。
+     */
+    @Override
+    public List<MonthlyProfitVO> getMonthlyProfit(TradeQueryDTO queryDTO) {
+        List<MonthlyProfitVO> result = new ArrayList<>();
+        for (Map<String, Object> row : baseMapper.aggregateMonthlyProfit(queryDTO)) {
+            MonthlyProfitVO vo = new MonthlyProfitVO();
+            vo.setMonth(String.valueOf(pick(row, "monthKey")));
+            vo.setTradeCount(toInt(pick(row, "tradeCount")));
+            vo.setProfitLoss(toDecimal(pick(row, "profitLoss")));
+            int winCount = toInt(pick(row, "winCount"));
+            vo.setWinRate(vo.getTradeCount() > 0
+                    ? BigDecimal.valueOf(winCount).divide(BigDecimal.valueOf(vo.getTradeCount()), 4, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO);
+            result.add(vo);
+        }
+        return result;
     }
 
     private int toInt(Object v) {

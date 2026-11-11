@@ -70,10 +70,33 @@ public class AnalysisService {
         return new ArrayList<>();
     }
 
+    /**
+     * 月度盈亏：由 trade-service 的 {@code GROUP BY} 聚合端点直接给出，不再拉全量交易在内存里分组。
+     *
+     * <p>下沉的收益是量级差：一次区间查询返回「N 笔交易」（可能几千行 Feign 载荷），
+     * 而结果只有「每月一行」（最多几十行）。胜率仍在 trade-service 用 BigDecimal 复算，
+     * 避免各数据库除法精度/舍入规则不同导致同一账户改前改后差一位。
+     *
+     * <p>失败时与其它分析接口一样降级为空列表（前端显示「暂无月度盈亏数据」），不抛给用户。
+     * <b>部署顺序</b>：trade-service 必须先上（新增 {@code /trade/internal/monthly-profit}），
+     * 否则本服务在灰度期间会拿到 404 并降级为空。
+     */
     @Cacheable(cacheNames = "monthlyProfit", key = "#userId + ':' + #startDate + ':' + #endDate")
     public List<MonthlyProfitVO> getMonthlyProfit(Long userId, LocalDate startDate, LocalDate endDate) {
-        List<TradeVO> trades = getTradeList(userId, null, startDate, endDate);
-        return computeMonthlyProfit(trades);
+        TradeQueryDTO queryDTO = new TradeQueryDTO();
+        queryDTO.setUserId(userId);
+        queryDTO.setStartDate(startDate);
+        queryDTO.setEndDate(endDate);
+
+        try {
+            var result = tradeFeignClient.getMonthlyProfit(queryDTO);
+            if (result != null && result.getCode() == 200 && result.getData() != null) {
+                return result.getData();
+            }
+        } catch (Exception e) {
+            log.warn("获取月度盈亏失败，降级返回空: userId={}, error={}", userId, e.getMessage());
+        }
+        return new ArrayList<>();
     }
 
     /** 纯计算：由已拉取的交易列表推导月度盈亏，供 getPerformanceStats 复用，避免二次全量拉取。 */
