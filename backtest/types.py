@@ -72,3 +72,6 @@ class BacktestResult:
     nav_series: list = field(default_factory=list)
     fills: list = field(default_factory=list)
     round_trip_pnls: list = field(default_factory=list)
+    # A 股涨跌停导致整单拒绝的次数。加密/纯费率口径恒为 0。
+    # 单独计数是因为它和「钱不够」性质不同：后者可以调仓解决，一字板买不进只能认。
+    limit_rejections: int = 0

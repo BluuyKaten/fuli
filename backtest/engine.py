@@ -50,8 +50,13 @@ class BacktestEngine:
 
             # 1) 撮合上一根收盘时挂起的订单（在 bar i 开盘成交）
             if pending is not None and i >= 1:
-                outcome = self._matcher.fill(pending, bar.open, cash, position)
-                if not outcome.rejected:
+                # pre_close 只服务涨跌停判断；加密标的没配 price_limit_pct 时它不参与计算
+                outcome = self._matcher.fill(pending, bar.open, cash, position,
+                                             pre_close=bars[i - 1].close)
+                if outcome.rejected:
+                    if outcome.reason in ("limit_up", "limit_down"):
+                        result.limit_rejections += 1
+                else:
                     cash = outcome.cash
                     position = outcome.position
                     fee = outcome.fee
