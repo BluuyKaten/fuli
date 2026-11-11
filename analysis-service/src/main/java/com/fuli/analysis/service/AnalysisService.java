@@ -151,12 +151,7 @@ public class AnalysisService {
         // 2. 按日期排序
         trades.sort(Comparator.comparing(TradeVO::getTradeDate));
 
-        // 3. 获取所有涉及的股票
-        Set<String> stockCodes = trades.stream()
-                .map(TradeVO::getStockCode)
-                .collect(Collectors.toSet());
-
-        // 4. 确定日期范围
+        // 3. 确定日期范围
         LocalDate firstTradeDate = trades.get(0).getTradeDate();
         LocalDate lastTradeDate = trades.get(trades.size() - 1).getTradeDate();
         // 如果有传入 endDate 且晚于最后交易日期，使用传入的；否则延伸到今天
@@ -165,18 +160,20 @@ public class AnalysisService {
             endDateActual = lastTradeDate;
         }
 
-        // 5. 获取每只股票的每日收盘价
+        // 4. 获取每只股票的每日收盘价：区间按该股自己的持仓窗口收窄（见 priceWindows）
         Map<String, Map<LocalDate, BigDecimal>> stockDailyPrices = new HashMap<>();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyyMMdd");
 
-        for (String stockCode : stockCodes) {
+        for (Map.Entry<String, PriceWindow> entry : priceWindows(trades, endDateActual).entrySet()) {
+            String stockCode = entry.getKey();
+            PriceWindow window = entry.getValue();
             Map<LocalDate, BigDecimal> dailyPrices = new HashMap<>();
             try {
                 // 通过 data-service 获取日线数据。
-                // 第 4 个参数 limit 传 null：这里要的是 firstTradeDate~endDateActual 的整段区间，
-                // 截断会让后续的持仓估值缺日。与练习模块同理，见 KlineQueryService.query 的注释。
+                // 第 4 个参数 limit 传 null：这里要的是窗口内整段区间，截断会让后续的持仓估值缺日。
+                // 与练习模块同理，见 KlineQueryService.query 的注释。
                 List<Map<String, Object>> result = dataFeignClient.getDailyData(stockCode,
-                        firstTradeDate.format(fmt), endDateActual.format(fmt), null);
+                        window.from().format(fmt), window.to().format(fmt), null);
                 if (result != null) {
                     for (Map<String, Object> item : result) {
                         String tradeDateStr = (String) item.get("tradeDate");
@@ -270,6 +267,44 @@ public class AnalysisService {
         result.put("assets", assets);
         return result;
     }
+
+    /**
+     * 每只股票真正需要行情的日期窗口。
+     *
+     * <p>原先所有股票都按「全账户最早交易日 ~ 今天」各拉一次日线：一只 2020 年就清仓的票，
+     * 到 2026 年仍在每次打开仪表盘时把 6 年日线重新拉一遍，而它的持仓量早就是 0——
+     * 估值只在 {@code quantity > 0} 的日期才读价格，其余全是白拉的载荷。
+     *
+     * <p>窗口取「该股首笔交易 ~ 该股末笔交易」；末笔之后仍持有（净买入为正）的延伸到
+     * {@code endDateActual}。这个窗口覆盖了所有 {@code quantity > 0} 的日期，所以曲线逐点不变
+     * （有对拍测试钉住）。注意入参 trades 必须已按交易日升序，否则「首笔/末笔」不成立。
+     */
+    private static Map<String, PriceWindow> priceWindows(List<TradeVO> trades, LocalDate endDateActual) {
+        Map<String, LocalDate[]> span = new LinkedHashMap<>();
+        Map<String, Long> netQuantity = new HashMap<>();
+        for (TradeVO trade : trades) {
+            String code = trade.getStockCode();
+            LocalDate date = trade.getTradeDate();
+            if (code == null || date == null) continue;
+            LocalDate[] range = span.get(code);
+            if (range == null) {
+                span.put(code, new LocalDate[]{date, date});
+            } else {
+                range[1] = date;
+            }
+            long quantity = trade.getTradeQuantity() != null ? trade.getTradeQuantity() : 0;
+            boolean buy = trade.getTradeType() != null && trade.getTradeType() == 1;
+            netQuantity.merge(code, buy ? quantity : -quantity, Long::sum);
+        }
+        // 按首次出现顺序返回，取数顺序与交易顺序一致（日志与测试都好读）
+        Map<String, PriceWindow> windows = new LinkedHashMap<>();
+        span.forEach((code, range) -> windows.put(code,
+                new PriceWindow(range[0], netQuantity.getOrDefault(code, 0L) > 0 ? endDateActual : range[1])));
+        return windows;
+    }
+
+    /** 某只股票需要行情的日期闭区间（含两端）。 */
+    private record PriceWindow(LocalDate from, LocalDate to) {}
 
     /** 获取初始资金（资产曲线起算基准），失败时回退到注册默认值。 */
     private BigDecimal getInitialCash(Long userId) {
