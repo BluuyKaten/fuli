@@ -28,7 +28,10 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -132,6 +135,28 @@ class OkxAuthenticationTest {
                 .andExpect(status().isOk());
         mvc(SECRET).perform(get("/data/okx/status").header("Authorization", bearer(1)))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void placeOrderAuditReadsOrdIdFromArrayResponse() throws Exception {
+        when(tradeService.placeOrder(anyLong(), anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(JsonNodeFactory.instance.arrayNode()
+                        .add(JsonNodeFactory.instance.objectNode()
+                                .put("ordId", "ord-array-1")
+                                .put("sCode", "0")
+                                .put("sMsg", "")));
+
+        mvc(SECRET, true).perform(post("/data/okx/trade/order")
+                        .header("Authorization", bearer(1))
+                        .contentType("application/json")
+                        .content("{\"symbol\":\"BTC-USDT.CRYPTO\",\"side\":\"buy\","
+                                + "\"ordType\":\"limit\",\"sz\":\"0.01\",\"px\":\"30000\","
+                                + "\"clOrdId\":\"c-array-1\"}"))
+                .andExpect(status().isOk());
+
+        verify(audit).record(argThat(event -> "placeOrder".equals(event.action())
+                && "SUCCESS".equals(event.outcome())
+                && "ord-array-1".equals(event.ordId())));
     }
 
     @Test

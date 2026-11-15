@@ -47,4 +47,16 @@ class OkxOrderResponseTest {
         assertNull(response.sCode());
         assertNull(response.sMsg());
     }
+
+    @Test
+    void nonObjectFirstItemHasNullFirstAndFields() {
+        JsonNode raw = JsonNodeFactory.instance.arrayNode().add("unexpected");
+
+        OkxOrderResponse response = OkxOrderResponse.from(raw);
+
+        assertNull(response.first());
+        assertNull(response.ordId());
+        assertNull(response.sCode());
+        assertNull(response.sMsg());
+    }
 }

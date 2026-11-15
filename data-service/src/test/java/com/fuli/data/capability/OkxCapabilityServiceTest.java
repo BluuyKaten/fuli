@@ -9,6 +9,7 @@ import com.fuli.data.okx.OkxClient;
 import com.fuli.data.okx.OkxCredentialException;
 import com.fuli.data.okx.OkxCredentialService;
 import com.fuli.data.okx.OkxCredentials;
+import com.fuli.data.okx.OkxOrderRejectedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -109,6 +111,32 @@ class OkxCapabilityServiceTest {
         service.execute("spot_place_order", Map.of(), Map.of("instId", "BTC-USDT", "sz", "0.01"), USER);
 
         verifyNoInteractions(client);
+    }
+
+    @Test
+    void rejectedWriteMarksSubmittedAndThrows() {
+        CryptoOrder pending = new CryptoOrder();
+        pending.setState(CryptoOrderState.PENDING.getCode());
+        when(orderLog.createPending(any())).thenReturn(pending);
+        JsonNode response = JsonNodeFactory.instance.arrayNode()
+                .add(JsonNodeFactory.instance.objectNode()
+                        .put("ordId", "")
+                        .put("sCode", "51008")
+                        .put("sMsg", "insufficient balance"));
+        when(client.privatePost(any(OkxCredentials.class), eq("/api/v5/trade/order"), any()))
+                .thenReturn(response);
+
+        Map<String, Object> body = Map.of(
+                "instId", "BTC-USDT",
+                "side", "buy",
+                "ordType", "limit",
+                "sz", "0.01",
+                "px", "30000");
+
+        assertThrows(OkxOrderRejectedException.class,
+                () -> service.execute("spot_place_order", Map.of(), body, USER));
+
+        verify(orderLog).markSubmitted(any(), eq(""), eq("51008"), eq("insufficient balance"));
     }
 
     @Test

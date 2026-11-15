@@ -34,3 +34,17 @@
 ## 遗留疑问
 
 无。传输异常仍直接向上抛出，不会自动重发。
+
+## 审查补测
+
+- `OkxOrderResponseTest` 新增数组首项为非对象时，`first`、`ordId`、`sCode`、`sMsg` 均为空的回归测试。
+- `OkxCapabilityServiceTest` 新增 `sCode=51008` 时先 `markSubmitted`、再抛 `OkxOrderRejectedException` 的回归测试。
+- `OkxAuthenticationTest` 新增控制器从数组回包提取 `ordId` 并写入成功审计事件的回归测试。
+
+将三个旧解析路径临时恢复后运行补测，三项测试均按预期失败；恢复当前实现后运行：
+
+```text
+.\mvnw.cmd -pl data-service -am "-Dtest=OkxTradeServiceWriteAheadTest,OkxTradeGuardTest,OkxCapabilityServiceTest,OkxOrderResponseTest,OkxAuthenticationTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+结果：`Tests run: 51, Failures: 0, Errors: 0, Skipped: 0`，构建成功。
