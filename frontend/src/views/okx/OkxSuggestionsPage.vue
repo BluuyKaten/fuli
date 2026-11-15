@@ -44,6 +44,7 @@
 
       <a-radio-group v-model:value="statusFilter" button-style="solid" size="small" class="filter">
         <a-radio-button value="new">待确认</a-radio-button>
+        <a-radio-button value="executing">执行中/待核实</a-radio-button>
         <a-radio-button value="executed">已执行</a-radio-button>
         <a-radio-button value="all">全部</a-radio-button>
       </a-radio-group>
@@ -107,7 +108,7 @@
                 拒绝
               </a-button>
             </a-space>
-            <span v-else class="dim">已处理</span>
+            <span v-else class="dim">{{ record.status === 'executing' ? '执行中/待核实' : '已处理' }}</span>
           </template>
         </template>
       </a-table>
@@ -118,7 +119,13 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { executeOkxSuggestion, listOkxSuggestions, rejectOkxSuggestion, type OkxSuggestion } from '@/api/okx'
+import {
+  executeOkxSuggestion,
+  listOkxSuggestions,
+  rejectOkxSuggestion,
+  type OkxSuggestion,
+  type OkxSuggestionFilter
+} from '@/api/okx'
 import { fmtPercent, fmtQty, fmtTime, sideText, statusColor, statusText } from './suggestionFormat'
 
 const REFRESH_MS = 30_000
@@ -127,7 +134,7 @@ const rows = ref<OkxSuggestion[]>([])
 const loading = ref(false)
 const executingId = ref<number | null>(null)
 const rejectingId = ref<number | null>(null)
-const statusFilter = ref<'new' | 'executed' | 'all'>('new')
+const statusFilter = ref<OkxSuggestionFilter>('new')
 const autoRefresh = ref(true)
 const lastLoadedAt = ref('-')
 
@@ -153,9 +160,11 @@ const filtered = computed(() => {
 })
 const pendingCount = computed(() => rows.value.filter((r) => r.status === 'new').length)
 const executedCount = computed(() => rows.value.filter((r) => r.status === 'executed').length)
-const emptyText = computed(() =>
-  statusFilter.value === 'new' ? '暂无待确认的建议单' : '暂无记录'
-)
+const emptyText = computed(() => {
+  if (statusFilter.value === 'new') return '暂无待确认的建议单'
+  if (statusFilter.value === 'executing') return '暂无执行中的建议单'
+  return '暂无记录'
+})
 
 const nowText = () => fmtTime(new Date().toISOString())
 

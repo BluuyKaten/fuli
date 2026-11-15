@@ -82,6 +82,12 @@ export const getOkxWsStatus = () =>
 
 /* ---------------- 建议单（阶段 3：人工确认 → 模拟盘下单） ---------------- */
 
+/** 建议单状态，与 data_db.chk_okx_suggestion_status（V16）保持一致。 */
+export type OkxSuggestionStatus = 'new' | 'executing' | 'executed' | 'rejected' | 'expired'
+
+/** 建议单页面筛选值；all 表示不限制状态。 */
+export type OkxSuggestionFilter = OkxSuggestionStatus | 'all'
+
 /**
  * 一条下单建议。**它不是订单**：只是 Agent / 策略「想做」什么，
  * 要靠 `status` 与 `source` 一眼看出「建议 ≠ 成交」。
@@ -102,8 +108,8 @@ export interface OkxSuggestion {
   reason?: string | null
   /** 0~1；策略信号不传时为 null */
   confidence?: number | null
-  /** new（待确认）/ executed（已执行） */
-  status: string
+  /** new（待确认）/ executing（执行中/待核实）/ executed（已执行）/ rejected（已拒绝）/ expired（已过期） */
+  status: OkxSuggestionStatus
   /** agent / strategy ... */
   source?: string | null
   createTime?: string
@@ -114,7 +120,7 @@ export interface OkxSuggestionExecution {
   /** 固定 sugg-<id>，重复执行由它兜底幂等 */
   clOrdId: string
   ordId?: string | null
-  status: string
+  status: OkxSuggestionStatus
 }
 
 export const listOkxSuggestions = (limit = 20) =>
@@ -139,6 +145,6 @@ export const executeOkxSuggestion = (id: number) =>
  * 没有这个入口时，不打算执行的建议会永远挂在 `new`，「待确认」数量清不掉。
  */
 export const rejectOkxSuggestion = (id: number) =>
-  request.post<any, { code: number; data: { suggestionId: number; status: string } }>(
+  request.post<any, { code: number; data: { suggestionId: number; status: OkxSuggestionStatus } }>(
     `/data/okx/suggestions/${id}/reject`
   )
