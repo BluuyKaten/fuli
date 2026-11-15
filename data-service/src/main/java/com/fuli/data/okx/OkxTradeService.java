@@ -155,16 +155,20 @@ public class OkxTradeService {
         JsonNode response = client.privatePost(creds, "/api/v5/trade/order", body);
 
         // ③ 入口返回后登记 ordId / sCode。被拒时没有 WS 推送，必须在这里定格。
-        String ordId = null;
-        String sCode = null;
-        String sMsg = null;
-        JsonNode first = (response == null) ? null : response.path("data").path(0);
-        if (first != null && first.isObject()) {
-            ordId = first.path("ordId").asText(null);
-            sCode = first.path("sCode").asText(null);
-            sMsg = first.path("sMsg").asText(null);
-        }
+        OkxOrderResponse orderResponse = OkxOrderResponse.from(response);
+        String ordId = orderResponse.ordId();
+        String sCode = orderResponse.sCode();
+        String sMsg = orderResponse.sMsg();
         orderLog.markSubmitted(effectiveClOrdId, ordId, sCode, sMsg);
+        if (!"0".equals(sCode)) {
+            if (sCode != null && !sCode.isBlank()) {
+                throw new OkxOrderRejectedException(sCode, sMsg);
+            }
+            throw new IllegalStateException("OKX 订单响应缺少 sCode 或首项数据");
+        }
+        if (ordId == null || ordId.isBlank()) {
+            throw new IllegalStateException("OKX 订单响应缺少 ordId");
+        }
         riskControl.record(userId, notional);
         return response;
     }
@@ -200,16 +204,13 @@ public class OkxTradeService {
 
     /** 幂等命中时给调用方一个形状与 OKX 响应一致的回包，明确标注 skipped。 */
     private static JsonNode idempotentHitResponse(CryptoOrder logged) {
-        ObjectNode root = NODES.objectNode();
-        root.put("code", "0");
-        root.put("msg", "");
-        ArrayNode data = root.putArray("data");
+        ArrayNode data = NODES.arrayNode();
         ObjectNode item = data.addObject();
         item.put("clOrdId", logged.getClOrdId());
         item.put("ordId", logged.getOrdId());
         item.put("sCode", "0");
         item.put("sMsg", "duplicate clOrdId: existing open order, request skipped");
-        return root;
+        return data;
     }
 
     /** 计算本单金额：限价 = size × px；市价 = size × 最新成交价。 */
@@ -228,7 +229,7 @@ public class OkxTradeService {
     private BigDecimal latestPrice(String instId) {
         try {
             JsonNode resp = client.publicGet("/api/v5/market/ticker", Map.of("instId", instId));
-            JsonNode first = resp == null ? null : resp.path("data").path(0);
+            JsonNode first = resp == null || !resp.isArray() ? null : resp.path(0);
             if (first != null && first.isObject()) {
                 String last = first.path("last").asText(null);
                 if (last != null && !last.isBlank()) {

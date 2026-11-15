@@ -6,6 +6,7 @@ import com.fuli.data.okx.OkxAccountIdentity;
 import com.fuli.data.okx.OkxCredentialService;
 import com.fuli.data.okx.OkxJson;
 import com.fuli.data.okx.OkxMarketService;
+import com.fuli.data.okx.OkxOrderResponse;
 import com.fuli.data.okx.OkxPeriods;
 import com.fuli.data.okx.OkxSymbols;
 import com.fuli.data.okx.OkxTradeService;
@@ -246,11 +247,7 @@ public class OkxController {
     }
 
     private static String firstOrdId(JsonNode data) {
-        if (data == null) {
-            return null;
-        }
-        JsonNode first = data.path("data").path(0);
-        String ordId = first.path("ordId").asText(null);
+        String ordId = OkxOrderResponse.from(data).ordId();
         return ordId == null || ordId.isBlank() ? null : ordId;
     }
 

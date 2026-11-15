@@ -8,6 +8,8 @@ import com.fuli.data.okx.OkxClient;
 import com.fuli.data.okx.OkxCredentialException;
 import com.fuli.data.okx.OkxCredentialService;
 import com.fuli.data.okx.OkxCredentials;
+import com.fuli.data.okx.OkxOrderRejectedException;
+import com.fuli.data.okx.OkxOrderResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -78,8 +80,13 @@ public class OkxCapabilityService {
                 decimal(px), decimal(sz), String.valueOf(payload.get("tdMode"))));
         if (logged != null && !CryptoOrderState.PENDING.getCode().equals(logged.getState())) {
             log.info("[OKX-CAP] {} 幂等命中，跳过网络请求 clOrdId={}", cap.name(), clOrdId);
-            return com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
-                    .put("code", "0").put("msg", "duplicate clOrdId, skipped");
+            com.fasterxml.jackson.databind.node.ObjectNode item =
+                    com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+            item.put("clOrdId", clOrdId);
+            item.put("ordId", logged.getOrdId());
+            item.put("sCode", "0");
+            item.put("sMsg", "duplicate clOrdId, skipped");
+            return com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode().add(item);
         }
 
         // 凭证已在方法入口解析（见上），这里不再重复取
@@ -87,11 +94,14 @@ public class OkxCapabilityService {
                 userId, clOrdId);
         JsonNode response = client.privatePost(creds, cap.path(), payload);
 
-        JsonNode first = (response == null) ? null : response.path("data").path(0);
-        String ordId = first == null ? null : first.path("ordId").asText(null);
-        String sCode = first == null ? null : first.path("sCode").asText(null);
-        String sMsg = first == null ? null : first.path("sMsg").asText(null);
+        OkxOrderResponse orderResponse = OkxOrderResponse.from(response);
+        String ordId = orderResponse.ordId();
+        String sCode = orderResponse.sCode();
+        String sMsg = orderResponse.sMsg();
         orderLog.markSubmitted(clOrdId, ordId, sCode, sMsg);
+        if (sCode != null && !sCode.isBlank() && !"0".equals(sCode)) {
+            throw new OkxOrderRejectedException(sCode, sMsg);
+        }
         return response;
     }
 

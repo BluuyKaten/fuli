@@ -71,21 +71,18 @@ class OkxTradeServiceWriteAheadTest {
     }
 
     private static JsonNode tickerResponse(String last) {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        ObjectNode item = root.putArray("data").addObject();
+        ObjectNode item = JsonNodeFactory.instance.objectNode();
         item.put("last", last);
-        return root;
+        return JsonNodeFactory.instance.arrayNode().add(item);
     }
 
     private static JsonNode response(String ordId, String sCode, String sMsg) {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        root.put("code", "0");
-        ObjectNode item = root.putArray("data").addObject();
+        ObjectNode item = JsonNodeFactory.instance.objectNode();
         item.put("ordId", ordId);
         item.put("clOrdId", "c1");
         item.put("sCode", sCode);
         item.put("sMsg", sMsg);
-        return root;
+        return JsonNodeFactory.instance.arrayNode().add(item);
     }
 
     @SuppressWarnings("unchecked")
@@ -138,7 +135,7 @@ class OkxTradeServiceWriteAheadTest {
 
         verify(client, never()).privatePost(any(OkxCredentials.class), any(), any());
         verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
-        assertTrue(result.path("data").get(0).path("sMsg").asText().contains("skipped"));
+        assertTrue(result.get(0).path("sMsg").asText().contains("skipped"));
     }
 
     @Test
@@ -146,9 +143,61 @@ class OkxTradeServiceWriteAheadTest {
         when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
                 .thenReturn(response("", "51008", "insufficient balance"));
 
-        service.placeOrder(USER, "BTC-USDT", "buy", "market", "0.01", null, "c1");
+        assertThrows(OkxOrderRejectedException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "market", "0.01", null, "c1"));
 
         verify(orderLog).markSubmitted("c1", "", "51008", "insufficient balance");
+        verify(riskControl, never()).record(any(Long.class), any());
+    }
+
+    @Test
+    void acceptedOrderRecordsRiskOnlyWhenOrdIdIsPresent() {
+        service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1");
+
+        verify(riskControl).record(eq(USER), eq(new java.math.BigDecimal("300.00")));
+    }
+
+    @Test
+    void emptyResponseDoesNotRecordRiskAndFailsClearly() {
+        when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
+                .thenReturn(JsonNodeFactory.instance.arrayNode());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1"));
+
+        assertTrue(error.getMessage().contains("订单响应"));
+        verify(riskControl, never()).record(any(Long.class), any());
+    }
+
+    @Test
+    void missingOrdIdDoesNotRecordRiskAndFailsClearly() {
+        when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
+                .thenReturn(response(null, "0", ""));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1"));
+
+        assertTrue(error.getMessage().contains("ordId"));
+        verify(riskControl, never()).record(any(Long.class), any());
+    }
+
+    @Test
+    void marketRiskUsesLastFromArrayResponse() {
+        service.placeOrder(USER, "BTC-USDT", "buy", "market", "0.01", null, "c1");
+
+        verify(riskControl).record(eq(USER), eq(new java.math.BigDecimal("300.00")));
+    }
+
+    @Test
+    void marketOrderWithEmptyTickerIsRejectedClearly() {
+        when(client.publicGet(eq("/api/v5/market/ticker"), any()))
+                .thenReturn(JsonNodeFactory.instance.arrayNode());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "market", "0.01", null, "c1"));
+
+        assertTrue(error.getMessage().contains("最新价"));
+        verify(orderLog, never()).createPending(any());
     }
 
     @Test
