@@ -45,11 +45,13 @@ public class OkxOrderSuggestion implements Serializable {
     private BigDecimal confidence;
 
     /**
-     * new / executed / rejected / expired，仅表示人工处置结果。
+     * new / executing / executed / rejected / expired，仅表示人工处置结果。
      *
-     * <p>{@code executed} 只能由 {@code OkxSuggestionExecutionService} 写入
-     * （人工确认并成功下单）；状态机对应表约束 {@code chk_okx_suggestion_status}，
-     * 见 {@code sql/migrations/V15__okx_suggestion_status_executed.sql}。
+     * <p>人工确认先将 {@code new} 原子抢占为 {@code executing}，下单成功后再推进到
+     * {@code executed}；明确业务失败回退到 {@code new}，未知网络结果保持 {@code executing}。
+     * {@code rejected} 只能由人工拒绝入口从 {@code new} 推进。状态机对应表约束
+     * {@code chk_okx_suggestion_status}，
+     * 见 {@code sql/migrations/V16__okx_suggestion_executing.sql}。
      */
     private String status;
 

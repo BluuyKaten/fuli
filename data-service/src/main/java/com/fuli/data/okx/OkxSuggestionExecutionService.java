@@ -3,6 +3,7 @@ package com.fuli.data.okx;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fuli.data.okx.entity.OkxOrderSuggestion;
 import com.fuli.data.okx.mapper.OkxOrderSuggestionMapper;
+import com.fuli.data.risk.RiskControlException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,29 +40,32 @@ public class OkxSuggestionExecutionService {
      */
     public Map<String, Object> execute(long userId, long suggestionId) {
         OkxOrderSuggestion s = requireOwnPending(userId, suggestionId);
-
-        String clOrdId = "sugg-" + suggestionId;
-        JsonNode resp = tradeService.placeOrder(userId, s.getInstId(), s.getSide(), s.getOrdType(),
-                s.getSz().toPlainString(), s.getPx() == null ? null : s.getPx().toPlainString(), clOrdId);
-
-        String ordId = null;
-        JsonNode first = resp == null ? null : resp.path("data").path(0);
-        if (first != null && first.isObject()) {
-            ordId = first.path("ordId").asText(null);
+        if (mapper.claimNew(suggestionId, userId) == 0) {
+            throw new IllegalArgumentException("建议单已被其他请求处理：" + suggestionId);
         }
 
-        s.setStatus("executed");
-        mapper.updateById(s);
+        String clOrdId = "sugg-" + suggestionId;
+        try {
+            JsonNode resp = tradeService.placeOrder(userId, s.getInstId(), s.getSide(), s.getOrdType(),
+                    s.getSz().toPlainString(), s.getPx() == null ? null : s.getPx().toPlainString(), clOrdId);
 
-        log.info("[OKX-SUGGEST] 人工确认下单 suggestionId={} {} {} {} clOrdId={} ordId={}",
-                suggestionId, s.getInstId(), s.getSide(), s.getOrdType(), clOrdId, ordId);
+            String ordId = OkxOrderResponse.from(resp).ordId();
+            mapper.markExecuted(suggestionId, userId);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("suggestionId", suggestionId);
-        result.put("clOrdId", clOrdId);
-        result.put("ordId", ordId);
-        result.put("status", "executed");
-        return result;
+            log.info("[OKX-SUGGEST] 人工确认下单 suggestionId={} {} {} {} clOrdId={} ordId={}",
+                    suggestionId, s.getInstId(), s.getSide(), s.getOrdType(), clOrdId, ordId);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("suggestionId", suggestionId);
+            result.put("clOrdId", clOrdId);
+            result.put("ordId", ordId);
+            result.put("status", "executed");
+            return result;
+        } catch (OkxOrderRejectedException | IllegalArgumentException | OkxCredentialException |
+                 RiskControlException e) {
+            mapper.resetExecuting(suggestionId, userId);
+            throw e;
+        }
     }
 
     /**
@@ -76,9 +80,9 @@ public class OkxSuggestionExecutionService {
      */
     public Map<String, Object> reject(long userId, long suggestionId) {
         OkxOrderSuggestion s = requireOwnPending(userId, suggestionId);
-
-        s.setStatus("rejected");
-        mapper.updateById(s);
+        if (mapper.rejectNew(suggestionId, userId) == 0) {
+            throw new IllegalArgumentException("建议单已被其他请求处理：" + suggestionId);
+        }
 
         log.info("[OKX-SUGGEST] 人工否决 suggestionId={} {} {} {}", suggestionId,
                 s.getInstId(), s.getSide(), s.getOrdType());
