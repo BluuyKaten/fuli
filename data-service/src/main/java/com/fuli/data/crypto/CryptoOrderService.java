@@ -82,7 +82,13 @@ public class CryptoOrderService {
         return order;
     }
 
-    /** 交易所入口返回后更新。sCode 非 0 表示被拒（此时不会有 WS 推送，必须在这里定格）。 */
+    /**
+     * 交易所入口返回后更新。
+     *
+     * <p>只有明确的 {@code sCode=0 + ordId} 才能进入 live；缺字段属于结果未知，
+     * 必须保留 pending 等待对账。非零且非空的 sCode 表示拒单，此时不会有 WS 推送，
+     * 才能在这里定格为 rejected。
+     */
     public CryptoOrder markSubmitted(String clOrdId, String ordId, String sCode, String sMsg) {
         CryptoOrder order = orderMapper.selectLatestByClOrdId(clOrdId);
         if (order == null) {
@@ -92,9 +98,15 @@ public class CryptoOrderService {
             // 重试/重复回调：已经登记过就直接返回，不重复改状态
             return order;
         }
-        boolean accepted = "0".equals(sCode);
+        if (sCode == null || sCode.isBlank()) {
+            throw new IllegalStateException("OKX 订单响应缺少 sCode，保留 pending 待核实：" + clOrdId);
+        }
+        boolean accepted = "0".equals(sCode.trim());
+        if (accepted && (ordId == null || ordId.isBlank())) {
+            throw new IllegalStateException("OKX 订单响应为成功但缺少 ordId，保留 pending 待核实：" + clOrdId);
+        }
         order.setOrdId(ordId);
-        order.setSCode(sCode);
+        order.setSCode(sCode.trim());
         order.setSMsg(sMsg);
         order.setState(accepted
                 ? CryptoOrderState.LIVE.getCode()

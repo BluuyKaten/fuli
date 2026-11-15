@@ -379,9 +379,11 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/
   data-service 侧的 `OkxInternalSuggestionController` 只依赖 `OkxSuggestionService`，
   连 `OkxTradeService` 都没注入——结构上不可能顺手下单。
 - 查看自己的建议：`GET /data/okx/suggestions?limit=20`。
-- `status` 只是人工处置结果（`new` / `executed` / `rejected` / `expired`），**不代表已下单**；
-  `executed` 表示「人工确认并已成功下单」，由 `OkxSuggestionExecutionService` 写入。
-  该四态由表约束 `chk_okx_suggestion_status` 强制（见 V15 迁移）。
+- `status` 只是人工处置结果（`new` / `executing` / `executed` / `rejected` / `expired`），**不代表已下单**；
+- `executing` 表示请求已抢占、外部结果尚未确认，即「执行中/待核实」，此时不要重复提交；
+- `executed` 表示「人工确认并已成功下单」，由 `OkxSuggestionExecutionService` 写入；明确业务失败会从
+  `executing` 回到 `new`，可以重试，未知网络结果保持 `executing`。状态集合由表约束
+  `chk_okx_suggestion_status` 强制（见 V16 迁移）。
 - 内部写入走 `/internal/okx/suggestion` + `X-Internal-Key`（网关会拒绝任何含 `internal`
   段的路径，外部到不了）。
 

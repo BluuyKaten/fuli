@@ -132,7 +132,8 @@ export const listOkxSuggestions = (limit = 20) =>
  * 人工确认一条建议单 → 真实模拟盘下单。
  *
  * 要求用户级交易权限（`sys_user.okx_trade_enabled=1`），服务账号硬 403；
- * 后端会过四道风控，失败时建议单保持 `new`，可以重试。
+ * 后端会过四道风控；明确业务失败时回退到 `new`，可以重试，外部结果未知时保持
+ * `executing`（执行中/待核实），避免重复下单。
  */
 export const executeOkxSuggestion = (id: number) =>
   request.post<any, { code: number; data: OkxSuggestionExecution }>(

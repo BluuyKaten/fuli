@@ -157,6 +157,7 @@ class OkxSuggestionExecutionServiceTest {
     private static Stream<Arguments> knownBusinessFailures() {
         return Stream.of(
                 Arguments.of(new OkxOrderRejectedException("51008", "余额不足")),
+                Arguments.of(new OkxClient.OkxApiException("50001", "交易所业务错误", "/api/v5/trade/order")),
                 Arguments.of(new IllegalArgumentException("参数非法")),
                 Arguments.of(new OkxCredentialException("凭证缺失")),
                 Arguments.of(new RiskControlException("风控拒绝"))

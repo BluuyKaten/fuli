@@ -159,18 +159,21 @@ public class OkxTradeService {
         String ordId = orderResponse.ordId();
         String sCode = orderResponse.sCode();
         String sMsg = orderResponse.sMsg();
-        orderLog.markSubmitted(effectiveClOrdId, ordId, sCode, sMsg);
-        if (!"0".equals(sCode)) {
-            if (sCode != null && !sCode.isBlank()) {
-                throw new OkxOrderRejectedException(sCode, sMsg);
+        if (sCode == null || sCode.isBlank()) {
+            throw new IllegalStateException("OKX 订单响应缺少 sCode 或首项数据，保留 pending 待核实");
+        }
+        String normalizedCode = sCode.trim();
+        if ("0".equals(normalizedCode)) {
+            if (ordId == null || ordId.isBlank()) {
+                throw new IllegalStateException("OKX 订单响应为成功但缺少 ordId，保留 pending 待核实");
             }
-            throw new IllegalStateException("OKX 订单响应缺少 sCode 或首项数据");
+            orderLog.markSubmitted(effectiveClOrdId, ordId, normalizedCode, sMsg);
+            riskControl.record(userId, notional);
+            return response;
         }
-        if (ordId == null || ordId.isBlank()) {
-            throw new IllegalStateException("OKX 订单响应缺少 ordId");
-        }
-        riskControl.record(userId, notional);
-        return response;
+        // 非空非 0 sCode 是交易所明确拒单：先定格，随后抛出业务异常。
+        orderLog.markSubmitted(effectiveClOrdId, ordId, normalizedCode, sMsg);
+        throw new OkxOrderRejectedException(normalizedCode, sMsg);
     }
 
     /**

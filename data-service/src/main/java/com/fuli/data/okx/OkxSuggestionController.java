@@ -47,7 +47,8 @@ public class OkxSuggestionController {
      * 人工确认一条建议单并转真实模拟盘下单（阶段 3.3）。
      *
      * <p>写操作：要求用户级交易权限（{@code requireWrite}），服务账号硬 403。
-     * 下单失败时建议单保持 {@code new} 可重试。
+     * 明确业务失败时建议单回退到 {@code new} 可重试；外部结果未知时保留
+     * {@code executing}，标记为执行中/待核实，避免重复下单。
      */
     @PostMapping("/{id}/execute")
     public Result<Map<String, Object>> execute(HttpServletRequest request, @PathVariable("id") long id) {

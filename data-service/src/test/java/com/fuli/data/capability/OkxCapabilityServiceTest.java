@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -137,6 +138,58 @@ class OkxCapabilityServiceTest {
                 () -> service.execute("spot_place_order", Map.of(), body, USER));
 
         verify(orderLog).markSubmitted(any(), eq(""), eq("51008"), eq("insufficient balance"));
+    }
+
+    @Test
+    void emptyWriteResponseDoesNotRegisterOrderAndFailsClearly() {
+        CryptoOrder pending = new CryptoOrder();
+        pending.setState(CryptoOrderState.PENDING.getCode());
+        when(orderLog.createPending(any())).thenReturn(pending);
+        when(client.privatePost(any(OkxCredentials.class), eq("/api/v5/trade/order"), any()))
+                .thenReturn(JsonNodeFactory.instance.arrayNode());
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.execute("spot_place_order", Map.of(), Map.of(
+                        "instId", "BTC-USDT", "sz", "0.01"), USER));
+
+        assertTrue(error.getMessage().contains("订单响应"));
+        verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
+    }
+
+    @Test
+    void missingSCodeDoesNotRegisterOrderAndFailsClearly() {
+        CryptoOrder pending = new CryptoOrder();
+        pending.setState(CryptoOrderState.PENDING.getCode());
+        when(orderLog.createPending(any())).thenReturn(pending);
+        JsonNode response = JsonNodeFactory.instance.arrayNode()
+                .add(JsonNodeFactory.instance.objectNode().put("ordId", "ord-1"));
+        when(client.privatePost(any(OkxCredentials.class), eq("/api/v5/trade/order"), any()))
+                .thenReturn(response);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.execute("spot_place_order", Map.of(), Map.of(
+                        "instId", "BTC-USDT", "sz", "0.01"), USER));
+
+        assertTrue(error.getMessage().contains("sCode"));
+        verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
+    }
+
+    @Test
+    void acceptedWriteWithoutOrdIdDoesNotRegisterOrderAndFailsClearly() {
+        CryptoOrder pending = new CryptoOrder();
+        pending.setState(CryptoOrderState.PENDING.getCode());
+        when(orderLog.createPending(any())).thenReturn(pending);
+        JsonNode response = JsonNodeFactory.instance.arrayNode()
+                .add(JsonNodeFactory.instance.objectNode().put("sCode", "0"));
+        when(client.privatePost(any(OkxCredentials.class), eq("/api/v5/trade/order"), any()))
+                .thenReturn(response);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.execute("spot_place_order", Map.of(), Map.of(
+                        "instId", "BTC-USDT", "sz", "0.01"), USER));
+
+        assertTrue(error.getMessage().contains("ordId"));
+        verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
     }
 
     @Test

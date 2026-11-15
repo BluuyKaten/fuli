@@ -358,11 +358,12 @@ Binance Vision + Gate（加密）、OKX（加密）。
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | GET | /data/okx/suggestions?limit= | 用户 JWT | 最近的建议单（Agent 生成，等人处理） |
-| POST | /data/okx/suggestions/{id}/execute | 用户 JWT + 交易权限 | 人工确认后转真实模拟盘下单；过四道风控。失败时状态不变，可重试 |
+| POST | /data/okx/suggestions/{id}/execute | 用户 JWT + 交易权限 | 人工确认后转真实模拟盘下单；过四道风控。明确业务失败回到 `new` 可重试，结果未知保持 `executing` 待核实 |
 | POST | /data/okx/suggestions/{id}/reject | 用户 JWT + 交易权限 | 人工否决，只把状态推进到 `rejected`，不产生任何订单 |
 
-> 状态机：`new → executed | rejected`（V15 起）。两个动作共用 `requireOwnPending`，
-> 并发下不会出现「一个人确认、一个人否决」两个都成功。
+> 状态机：确认执行先把 `new` 抢占为 `executing`；成功为 `executed`，明确业务失败回到 `new`，
+> 外部结果未知继续保持 `executing` 待核实；人工否决走 `new → rejected`。两个动作共用
+> `requireOwnPending`，并发下不会出现「一个人确认、一个人否决」两个都成功。
 
 ### 6.5 WebSocket 与余额快照 `OkxWsController`
 

@@ -98,11 +98,20 @@ public class OkxCapabilityService {
         String ordId = orderResponse.ordId();
         String sCode = orderResponse.sCode();
         String sMsg = orderResponse.sMsg();
-        orderLog.markSubmitted(clOrdId, ordId, sCode, sMsg);
-        if (sCode != null && !sCode.isBlank() && !"0".equals(sCode)) {
-            throw new OkxOrderRejectedException(sCode, sMsg);
+        if (sCode == null || sCode.isBlank()) {
+            throw new IllegalStateException("OKX 订单响应缺少 sCode 或首项数据，保留 pending 待核实");
         }
-        return response;
+        String normalizedCode = sCode.trim();
+        if ("0".equals(normalizedCode)) {
+            if (ordId == null || ordId.isBlank()) {
+                throw new IllegalStateException("OKX 订单响应为成功但缺少 ordId，保留 pending 待核实");
+            }
+            orderLog.markSubmitted(clOrdId, ordId, normalizedCode, sMsg);
+            return response;
+        }
+        // 非空非 0 sCode 是交易所明确拒单：先定格，随后抛出业务异常。
+        orderLog.markSubmitted(clOrdId, ordId, normalizedCode, sMsg);
+        throw new OkxOrderRejectedException(normalizedCode, sMsg);
     }
 
     /** 服务账号没有 userId，私有能力一律拒绝；这里给出明确原因而不是 NPE。 */

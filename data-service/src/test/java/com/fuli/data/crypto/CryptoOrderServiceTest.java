@@ -134,6 +134,32 @@ class CryptoOrderServiceTest {
     }
 
     @Test
+    void markSubmittedRejectsMissingSCodeAndLeavesPendingUnchanged() {
+        CryptoOrder pending = order(CryptoOrderState.PENDING.getCode(), null);
+        when(orderMapper.selectLatestByClOrdId(CL_ORD_ID)).thenReturn(pending);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.markSubmitted(CL_ORD_ID, "ord-1", null, ""));
+
+        assertTrue(error.getMessage().contains("sCode"));
+        assertEquals(CryptoOrderState.PENDING.getCode(), pending.getState());
+        verify(orderMapper, never()).updateById(any(CryptoOrder.class));
+    }
+
+    @Test
+    void markSubmittedRejectsAcceptedOrderWithoutOrdIdAndLeavesPendingUnchanged() {
+        CryptoOrder pending = order(CryptoOrderState.PENDING.getCode(), null);
+        when(orderMapper.selectLatestByClOrdId(CL_ORD_ID)).thenReturn(pending);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.markSubmitted(CL_ORD_ID, null, "0", ""));
+
+        assertTrue(error.getMessage().contains("ordId"));
+        assertEquals(CryptoOrderState.PENDING.getCode(), pending.getState());
+        verify(orderMapper, never()).updateById(any(CryptoOrder.class));
+    }
+
+    @Test
     void markSubmittedThrowsWhenWriteAheadLogIsMissing() {
         when(orderMapper.selectLatestByClOrdId(CL_ORD_ID)).thenReturn(null);
         assertThrows(IllegalStateException.class,

@@ -166,6 +166,7 @@ class OkxTradeServiceWriteAheadTest {
                 () -> service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1"));
 
         assertTrue(error.getMessage().contains("订单响应"));
+        verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
         verify(riskControl, never()).record(any(Long.class), any());
     }
 
@@ -178,6 +179,20 @@ class OkxTradeServiceWriteAheadTest {
                 () -> service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1"));
 
         assertTrue(error.getMessage().contains("ordId"));
+        verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
+        verify(riskControl, never()).record(any(Long.class), any());
+    }
+
+    @Test
+    void missingSCodeDoesNotRegisterOrderOrRecordRiskAndKeepsPendingForReconciliation() {
+        when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
+                .thenReturn(response("ord-1", null, ""));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1"));
+
+        assertTrue(error.getMessage().contains("sCode"));
+        verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
         verify(riskControl, never()).record(any(Long.class), any());
     }
 

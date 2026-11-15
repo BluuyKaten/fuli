@@ -63,7 +63,8 @@ public class OkxSuggestionExecutionService {
             result.put("ordId", ordId);
             result.put("status", "executed");
             return result;
-        } catch (IllegalArgumentException | OkxCredentialException | RiskControlException e) {
+        } catch (IllegalArgumentException | OkxCredentialException | RiskControlException
+                 | OkxClient.OkxApiException e) {
             mapper.resetExecuting(suggestionId, userId);
             throw e;
         }
