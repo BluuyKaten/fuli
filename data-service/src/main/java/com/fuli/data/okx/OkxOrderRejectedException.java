@@ -1,7 +1,7 @@
 package com.fuli.data.okx;
 
 /** OKX 返回嵌套订单拒单结果时抛出的业务异常。 */
-public final class OkxOrderRejectedException extends RuntimeException {
+public final class OkxOrderRejectedException extends IllegalArgumentException {
 
     private final String sCode;
 

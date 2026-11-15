@@ -72,6 +72,24 @@ class OkxSuggestionExecutionServiceTest {
     }
 
     @Test
+    void doesNotReportExecutedWhenMarkExecutedCasWasLost() {
+        OkxOrderSuggestionMapper mapper = mock(OkxOrderSuggestionMapper.class);
+        when(mapper.selectById(100L)).thenReturn(suggestion("new"));
+        when(mapper.claimNew(100L, USER)).thenReturn(1);
+        when(mapper.markExecuted(100L, USER)).thenReturn(0);
+        OkxTradeService trade = mock(OkxTradeService.class);
+        when(trade.placeOrder(eq(USER), eq("BTC-USDT"), eq("buy"), eq("limit"),
+                eq("0.01"), eq("30000"), eq("sugg-100"))).thenReturn(orderResponse("ord-9"));
+
+        OkxSuggestionExecutionService svc = new OkxSuggestionExecutionService(mapper, trade);
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> svc.execute(USER, 100L));
+
+        assertTrue(ex.getMessage().contains("executed"));
+        verify(mapper, never()).resetExecuting(anyLong(), anyLong());
+    }
+
+    @Test
     void doesNotPlaceOrderWhenClaimNewWasLost() {
         OkxOrderSuggestionMapper mapper = mock(OkxOrderSuggestionMapper.class);
         when(mapper.selectById(100L)).thenReturn(suggestion("new"));

@@ -33,4 +33,41 @@
 
 ## 遗留疑问
 
-无阻塞疑问。当前需求没有规定 `markExecuted` 返回 0 时的额外处理策略，服务按条件更新调用后继续返回成功；如后续要求把该异常状态显式暴露，可再补充专门规则和测试。
+无阻塞疑问。
+
+## 审查修复记录
+
+审查发现两项缺陷，按 TDD 先补测试并确认红灯：
+
+- `markExecuted` 返回 0 时原实现仍返回 `executed`；新增测试确认该行为失败。
+- `OkxOrderRejectedException` 继承 `RuntimeException`，建议单控制器未捕获时产生 Servlet 异常；新增 MVC 测试确认拒单不能返回业务码 400。
+
+修复内容：
+
+- `execute` 检查 `markExecuted` 返回值；返回 0 时抛出可识别的 `IllegalStateException`，不调用 `resetExecuting`，保持执行中状态以等待核实。
+- `OkxOrderRejectedException` 改为继承 `IllegalArgumentException`，复用建议单控制器已有的 400 业务错误处理；同步简化执行服务的多 catch。
+- 新增 `OkxSuggestionControllerTest`，验证拒单响应 HTTP 200 且响应体 `code=400`，符合现有 `Result.error(400, ...)` 语义。
+
+修复前红灯命令：
+
+```text
+./mvnw.cmd -pl data-service -am "-Dtest=OkxSuggestionExecutionServiceTest,OkxSuggestionControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+结果为 1 个测试失败（`markExecuted=0` 未抛异常）和 1 个测试错误（拒单异常未被控制器捕获）。
+
+修复后建议单与控制器专项命令：
+
+```text
+./mvnw.cmd -pl data-service -am "-Dtest=OkxSuggestionExecutionServiceTest,OkxSuggestionControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+结果：17 个测试全部通过，`BUILD SUCCESS`。
+
+相关回归命令：
+
+```text
+./mvnw.cmd -pl data-service -am "-Dtest=OkxSuggestionExecutionServiceTest,OkxSuggestionControllerTest,OkxTradeServiceWriteAheadTest,OkxCapabilityServiceTest,OkxAuthenticationTest,OkxOrderResponseTest" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+结果：58 个测试全部通过，`BUILD SUCCESS`；`git diff --check` 通过。

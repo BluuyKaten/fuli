@@ -50,7 +50,9 @@ public class OkxSuggestionExecutionService {
                     s.getSz().toPlainString(), s.getPx() == null ? null : s.getPx().toPlainString(), clOrdId);
 
             String ordId = OkxOrderResponse.from(resp).ordId();
-            mapper.markExecuted(suggestionId, userId);
+            if (mapper.markExecuted(suggestionId, userId) == 0) {
+                throw new IllegalStateException("建议单下单成功但无法标记为 executed，仍保持 executing：" + suggestionId);
+            }
 
             log.info("[OKX-SUGGEST] 人工确认下单 suggestionId={} {} {} {} clOrdId={} ordId={}",
                     suggestionId, s.getInstId(), s.getSide(), s.getOrdType(), clOrdId, ordId);
@@ -61,8 +63,7 @@ public class OkxSuggestionExecutionService {
             result.put("ordId", ordId);
             result.put("status", "executed");
             return result;
-        } catch (OkxOrderRejectedException | IllegalArgumentException | OkxCredentialException |
-                 RiskControlException e) {
+        } catch (IllegalArgumentException | OkxCredentialException | RiskControlException e) {
             mapper.resetExecuting(suggestionId, userId);
             throw e;
         }
