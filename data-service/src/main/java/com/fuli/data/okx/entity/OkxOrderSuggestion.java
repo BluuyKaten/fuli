@@ -45,7 +45,7 @@ public class OkxOrderSuggestion implements Serializable {
     private BigDecimal confidence;
 
     /**
-     * new / executed / rejected / expired，仅表示人工处置结果。
+     * new / executing / executed / rejected / expired，仅表示人工处置结果。
      *
      * <p>{@code executed} 只能由 {@code OkxSuggestionExecutionService} 写入
      * （人工确认并成功下单）；状态机对应表约束 {@code chk_okx_suggestion_status}，

@@ -107,7 +107,7 @@
                 拒绝
               </a-button>
             </a-space>
-            <span v-else class="dim">已处理</span>
+            <span v-else class="dim">{{ record.status === 'executing' ? '待核实' : '已处理' }}</span>
           </template>
         </template>
       </a-table>

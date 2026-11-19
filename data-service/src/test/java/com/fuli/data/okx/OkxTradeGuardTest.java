@@ -1,5 +1,7 @@
 package com.fuli.data.okx;
 
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fuli.data.config.OkxConfig;
 import com.fuli.data.crypto.CryptoOrderService;
 import com.fuli.data.crypto.CryptoOrderState;
@@ -51,6 +53,13 @@ class OkxTradeGuardTest {
     private RiskControlService riskControl;
 
     private OkxTradeService service;
+
+    private static ArrayNode orderResponse(String ordId) {
+        ArrayNode data = JsonNodeFactory.instance.arrayNode();
+        data.addObject().put("ordId", ordId).put("sCode", "0").put("sMsg", "");
+        return data;
+    }
+
 
     @BeforeEach
     void setUp() {
@@ -158,7 +167,8 @@ class OkxTradeGuardTest {
     @SuppressWarnings("unchecked")
     void sendsCashSpotOrder() {
         config.setTradeEnabled(true);
-        when(client.privatePost(any(OkxCredentials.class), anyString(), any())).thenReturn(null);
+        when(client.privatePost(any(OkxCredentials.class), anyString(), any()))
+                .thenReturn(orderResponse("ord-guard"));
 
         service.placeOrder(USER, "BTC-USDT.CRYPTO", "buy", "limit", "0.0100", "30000.00", "cli-1");
 
@@ -188,7 +198,8 @@ class OkxTradeGuardTest {
     @DisplayName("撤单的凭证也来自调用者本人")
     void cancelUsesCallerCredentials() {
         config.setTradeEnabled(true);
-        when(client.privatePost(any(OkxCredentials.class), anyString(), any())).thenReturn(null);
+        when(client.privatePost(any(OkxCredentials.class), anyString(), any()))
+                .thenReturn(orderResponse("ord-guard"));
         when(orderLog.findByOrdId("42")).thenReturn(null);
 
         service.cancelOrder(USER, "BTC-USDT.CRYPTO", "42");

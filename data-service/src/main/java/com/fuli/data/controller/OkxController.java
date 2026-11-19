@@ -8,6 +8,7 @@ import com.fuli.data.okx.OkxJson;
 import com.fuli.data.okx.OkxMarketService;
 import com.fuli.data.okx.OkxPeriods;
 import com.fuli.data.okx.OkxSymbols;
+import com.fuli.data.okx.OkxOrderResponse;
 import com.fuli.data.okx.OkxTradeService;
 import com.fuli.data.security.OkxAuthz;
 import com.fuli.data.security.OkxPrincipal;
@@ -249,9 +250,7 @@ public class OkxController {
         if (data == null) {
             return null;
         }
-        JsonNode first = data.path("data").path(0);
-        String ordId = first.path("ordId").asText(null);
-        return ordId == null || ordId.isBlank() ? null : ordId;
+        return OkxOrderResponse.first(data).ordId();
     }
 
     private static BigDecimal decimalOrNull(String raw) {

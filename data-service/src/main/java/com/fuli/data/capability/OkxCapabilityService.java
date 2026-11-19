@@ -5,6 +5,7 @@ import com.fuli.data.crypto.CryptoOrderService;
 import com.fuli.data.crypto.CryptoOrderState;
 import com.fuli.data.crypto.entity.CryptoOrder;
 import com.fuli.data.okx.OkxClient;
+import com.fuli.data.okx.OkxOrderResponse;
 import com.fuli.data.okx.OkxCredentialException;
 import com.fuli.data.okx.OkxCredentialService;
 import com.fuli.data.okx.OkxCredentials;
@@ -78,20 +79,30 @@ public class OkxCapabilityService {
                 decimal(px), decimal(sz), String.valueOf(payload.get("tdMode"))));
         if (logged != null && !CryptoOrderState.PENDING.getCode().equals(logged.getState())) {
             log.info("[OKX-CAP] {} 幂等命中，跳过网络请求 clOrdId={}", cap.name(), clOrdId);
-            return com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode()
-                    .put("code", "0").put("msg", "duplicate clOrdId, skipped");
+            var data = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.arrayNode();
+            data.addObject().put("sCode", "0").put("sMsg", "duplicate clOrdId, skipped");
+            return data;
         }
 
         // 凭证已在方法入口解析（见上），这里不再重复取
         log.info("[OKX-CAP] 写能力 {} path={} userId={} clOrdId={}", cap.name(), cap.path(),
                 userId, clOrdId);
-        JsonNode response = client.privatePost(creds, cap.path(), payload);
+        JsonNode response;
+        try {
+            response = client.privatePost(creds, cap.path(), payload);
+        } catch (OkxClient.OkxApiException e) {
+            orderLog.markSubmitted(clOrdId, null, e.getCode(), e.getMessage());
+            throw new com.fuli.data.okx.OkxOrderRejectedException(e.getCode(), e.getMessage());
+        }
 
-        JsonNode first = (response == null) ? null : response.path("data").path(0);
-        String ordId = first == null ? null : first.path("ordId").asText(null);
-        String sCode = first == null ? null : first.path("sCode").asText(null);
-        String sMsg = first == null ? null : first.path("sMsg").asText(null);
-        orderLog.markSubmitted(clOrdId, ordId, sCode, sMsg);
+        OkxOrderResponse result = OkxOrderResponse.first(response);
+        if (result.sCode() == null) {
+            throw new IllegalStateException("OKX 写能力响应缺少 sCode，订单状态待核实：" + clOrdId);
+        }
+        orderLog.markSubmitted(clOrdId, result.ordId(), result.sCode(), result.sMsg());
+        if (result.sCode() != null && !"0".equals(result.sCode())) {
+            throw new com.fuli.data.okx.OkxOrderRejectedException(result.sCode(), result.sMsg());
+        }
         return response;
     }
 

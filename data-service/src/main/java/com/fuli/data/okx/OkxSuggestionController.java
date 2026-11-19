@@ -47,14 +47,14 @@ public class OkxSuggestionController {
      * 人工确认一条建议单并转真实模拟盘下单（阶段 3.3）。
      *
      * <p>写操作：要求用户级交易权限（{@code requireWrite}），服务账号硬 403。
-     * 下单失败时建议单保持 {@code new} 可重试。
+     * 交易所明确拒单、凭证或风控失败会回到 {@code new}；网络结果不确定时保留 {@code executing}，等待核实。
      */
     @PostMapping("/{id}/execute")
     public Result<Map<String, Object>> execute(HttpServletRequest request, @PathVariable("id") long id) {
         try {
             OkxPrincipal principal = authz.requireWrite(request, "executeSuggestion", "suggestionId=" + id);
             return Result.success(executionService.execute(principal.userId(), id));
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException | IllegalStateException e) {
             return Result.error(400, e.getMessage());
         }
     }

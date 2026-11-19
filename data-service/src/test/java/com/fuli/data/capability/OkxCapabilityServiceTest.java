@@ -1,7 +1,6 @@
 package com.fuli.data.capability;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fuli.data.crypto.CryptoOrderService;
 import com.fuli.data.crypto.CryptoOrderState;
 import com.fuli.data.crypto.entity.CryptoOrder;
@@ -79,8 +78,8 @@ class OkxCapabilityServiceTest {
         CryptoOrder pending = new CryptoOrder();
         pending.setState(CryptoOrderState.PENDING.getCode());
         when(orderLog.createPending(any())).thenReturn(pending);
-        ObjectNode response = JsonNodeFactory.instance.objectNode().put("code", "0");
-        response.putArray("data").addObject().put("ordId", "ord-1").put("sCode", "0").put("sMsg", "");
+        var response = JsonNodeFactory.instance.arrayNode();
+        response.addObject().put("ordId", "ord-1").put("sCode", "0").put("sMsg", "");
         when(client.privatePost(any(OkxCredentials.class), eq("/api/v5/trade/order"), any()))
                 .thenReturn(response);
 

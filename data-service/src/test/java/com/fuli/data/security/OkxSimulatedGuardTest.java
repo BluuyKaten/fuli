@@ -1,5 +1,6 @@
 package com.fuli.data.security;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fuli.data.config.OkxConfig;
 import com.fuli.data.okx.OkxClient;
 import com.fuli.data.okx.OkxCredentials;
@@ -67,8 +68,9 @@ class OkxSimulatedGuardTest {
         ReflectionTestUtils.setField(client, "http", http);
 
         // ADR-0010：凭证按调用传入，但「恒定带模拟盘头」这条不能因此放松
-        client.privateGet(new OkxCredentials("key", "01234567890123456789012345678901", "pass"),
+        JsonNode data = client.privateGet(new OkxCredentials("key", "01234567890123456789012345678901", "pass"),
                 "/api/v5/account/balance", Map.of());
+        assertTrue(data.isArray());
 
         ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
         verify(http).send(captor.capture(), any());

@@ -8,10 +8,11 @@
 /** 方向：后端存 buy/sell，界面按 A 股习惯「买红卖绿」由调用方定色 */
 export const sideText = (side: string): string => (side === 'buy' ? '买入' : '卖出')
 
-/** 四态与表约束 chk_okx_suggestion_status 对齐（V15 起含 executed） */
+/** 五态与表约束 chk_okx_suggestion_status 对齐（V16 起含 executing） */
 const STATUS_TEXT: Record<string, string> = {
   new: '待确认',
   executed: '已执行',
+  executing: '执行中 / 待核实',
   rejected: '已拒绝',
   expired: '已过期'
 }
@@ -19,7 +20,7 @@ const STATUS_TEXT: Record<string, string> = {
 export const statusText = (status: string): string => STATUS_TEXT[status] ?? status
 
 export const statusColor = (status: string): string =>
-  status === 'new' ? 'orange' : status === 'executed' ? 'green' : status === 'rejected' ? 'red' : 'default'
+  status === 'new' ? 'orange' : status === 'executed' ? 'green' : status === 'executing' ? 'blue' : status === 'rejected' ? 'red' : 'default'
 
 /**
  * 数量 / 价格：小数位数不固定（BTC 8 位、部分币 2 位），

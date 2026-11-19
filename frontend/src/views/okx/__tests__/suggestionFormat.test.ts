@@ -42,6 +42,7 @@ describe('suggestionFormat', () => {
     expect(sideText('sell')).toBe('卖出')
     expect(statusText('new')).toBe('待确认')
     expect(statusText('executed')).toBe('已执行')
+    expect(statusText('executing')).toBe('执行中 / 待核实')
     expect(statusText('rejected')).toBe('已拒绝')
     expect(statusText('expired')).toBe('已过期')
     // 未知状态原样返回，别把新状态吞成空白
@@ -51,6 +52,7 @@ describe('suggestionFormat', () => {
   it('colors status by settlement state', () => {
     expect(statusColor('new')).toBe('orange')
     expect(statusColor('executed')).toBe('green')
+    expect(statusColor('executing')).toBe('blue')
     expect(statusColor('rejected')).toBe('red')
     expect(statusColor('expired')).toBe('default')
   })

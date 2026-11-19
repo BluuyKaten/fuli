@@ -1,6 +1,7 @@
 package com.fuli.data.okx;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fuli.data.config.OkxConfig;
@@ -19,7 +20,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -71,21 +75,19 @@ class OkxTradeServiceWriteAheadTest {
     }
 
     private static JsonNode tickerResponse(String last) {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        ObjectNode item = root.putArray("data").addObject();
-        item.put("last", last);
-        return root;
+        ArrayNode data = JsonNodeFactory.instance.arrayNode();
+        data.addObject().put("last", last);
+        return data;
     }
 
     private static JsonNode response(String ordId, String sCode, String sMsg) {
-        ObjectNode root = JsonNodeFactory.instance.objectNode();
-        root.put("code", "0");
-        ObjectNode item = root.putArray("data").addObject();
+        ArrayNode data = JsonNodeFactory.instance.arrayNode();
+        ObjectNode item = data.addObject();
         item.put("ordId", ordId);
         item.put("clOrdId", "c1");
         item.put("sCode", sCode);
         item.put("sMsg", sMsg);
-        return root;
+        return data;
     }
 
     @SuppressWarnings("unchecked")
@@ -138,19 +140,32 @@ class OkxTradeServiceWriteAheadTest {
 
         verify(client, never()).privatePost(any(OkxCredentials.class), any(), any());
         verify(orderLog, never()).markSubmitted(any(), any(), any(), any());
-        assertTrue(result.path("data").get(0).path("sMsg").asText().contains("skipped"));
+        assertTrue(result.get(0).path("sMsg").asText().contains("skipped"));
     }
 
     @Test
-    void rejectedEntryCodeIsForwardedToWriteAheadLog() {
+    void rejectedEntryCodeIsForwardedToWriteAheadLogAndNotCounted() {
         when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
                 .thenReturn(response("", "51008", "insufficient balance"));
 
-        service.placeOrder(USER, "BTC-USDT", "buy", "market", "0.01", null, "c1");
+        assertThrows(OkxOrderRejectedException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "market", "0.01", null, "c1"));
 
         verify(orderLog).markSubmitted("c1", "", "51008", "insufficient balance");
+        verify(riskControl, never()).record(anyLong(), any());
     }
 
+    @Test
+    void topLevelOkxBusinessErrorClosesLocalOrderAsRejected() {
+        when(client.privatePost(any(OkxCredentials.class), eq(ORDER_PATH), any()))
+                .thenThrow(new OkxClient.OkxApiException("51008", "insufficient balance", ORDER_PATH));
+
+        assertThrows(OkxOrderRejectedException.class,
+                () -> service.placeOrder(USER, "BTC-USDT", "buy", "limit", "0.01", "30000", "c1"));
+
+        verify(orderLog).markSubmitted(eq("c1"), isNull(), eq("51008"), anyString());
+        verify(riskControl, never()).record(anyLong(), any());
+    }
     @Test
     void cancelStillSendsWhenLocalOrderIsMissing() {
         when(orderLog.findByOrdId("ord-9")).thenReturn(null);

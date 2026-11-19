@@ -102,7 +102,7 @@ export interface OkxSuggestion {
   reason?: string | null
   /** 0~1；策略信号不传时为 null */
   confidence?: number | null
-  /** new（待确认）/ executed（已执行） */
+  /** new（待确认）/ executing（执行中或待核实）/ executed（已执行） */
   status: string
   /** agent / strategy ... */
   source?: string | null
@@ -126,7 +126,7 @@ export const listOkxSuggestions = (limit = 20) =>
  * 人工确认一条建议单 → 真实模拟盘下单。
  *
  * 要求用户级交易权限（`sys_user.okx_trade_enabled=1`），服务账号硬 403；
- * 后端会过四道风控，失败时建议单保持 `new`，可以重试。
+ * 后端拒单/风控/凭证失败时建议单回到 `new`；网络结果不确定时保留 `executing`，避免重复下单。
  */
 export const executeOkxSuggestion = (id: number) =>
   request.post<any, { code: number; data: OkxSuggestionExecution }>(
