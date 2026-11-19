@@ -138,3 +138,71 @@ CREATE TABLE IF NOT EXISTS `price_alert` (
     KEY `idx_alert_stock` (`stock_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='风控价格预警';
 
+
+-- 大智慧量化排行：交易日快照、排行明细和企业微信通知
+CREATE TABLE IF NOT EXISTS `quant_rank_snapshot` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    `trading_date` DATE NOT NULL COMMENT '交易日',
+    `source_type` VARCHAR(32) NOT NULL DEFAULT 'dazhihui' COMMENT '数据来源',
+    `source_name` VARCHAR(255) DEFAULT NULL COMMENT '来源文件或页面',
+    `raw_column_mapping_json` TEXT DEFAULT NULL COMMENT '原始列映射',
+    `imported_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '导入时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_quant_snapshot_user_date` (`user_id`, `trading_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='量化排行交易日快照';
+
+CREATE TABLE IF NOT EXISTS `quant_rank_item` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `snapshot_id` BIGINT UNSIGNED NOT NULL COMMENT '快照ID',
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    `trading_date` DATE NOT NULL COMMENT '交易日',
+    `stock_code` VARCHAR(32) NOT NULL COMMENT '标的代码',
+    `stock_name` VARCHAR(128) NOT NULL COMMENT '标的名称',
+    `metric` VARCHAR(128) DEFAULT NULL COMMENT '指标名称',
+    `metric_value` DECIMAL(20,8) NOT NULL COMMENT '指标值',
+    `rank` INT NOT NULL COMMENT '每日排名',
+    `raw_fields_json` TEXT DEFAULT NULL COMMENT '原始字段',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_quant_item_snapshot_code` (`snapshot_id`, `stock_code`),
+    KEY `idx_quant_item_user_date` (`user_id`, `trading_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='量化排行明细';
+
+CREATE TABLE IF NOT EXISTS `quant_notification_config` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    `enabled` TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用',
+    `webhook_url` VARCHAR(1024) DEFAULT NULL COMMENT '企业微信机器人地址',
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_quant_notification_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='量化排行通知配置';
+
+CREATE TABLE IF NOT EXISTS `quant_notification_log` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id` BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
+    `trading_date` DATE DEFAULT NULL COMMENT '交易日',
+    `channel` VARCHAR(32) NOT NULL COMMENT '通知通道',
+    `status` VARCHAR(16) NOT NULL COMMENT '发送状态',
+    `message` TEXT DEFAULT NULL COMMENT '消息内容',
+    `error` VARCHAR(1024) DEFAULT NULL COMMENT '错误信息',
+    `attempt_count` INT NOT NULL DEFAULT 0 COMMENT '尝试次数',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_quant_notification_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='量化排行通知日志';
+
+-- 量化排行自动化：配置与最近执行结果
+CREATE TABLE IF NOT EXISTS quant_automation_config (
+    user_id BIGINT NOT NULL PRIMARY KEY,
+    enabled TINYINT NOT NULL DEFAULT 0,
+    executable_path VARCHAR(1024) NOT NULL DEFAULT '',
+    startup_catch_up TINYINT NOT NULL DEFAULT 1,
+    last_attempt_at TIMESTAMP NULL,
+    last_success_date DATE NULL,
+    attempt_count INT NOT NULL DEFAULT 0,
+    last_run_date DATE NULL,
+    last_status VARCHAR(64) NULL,
+    last_imported_rows INT NOT NULL DEFAULT 0,
+    last_message VARCHAR(2048) NULL
+);

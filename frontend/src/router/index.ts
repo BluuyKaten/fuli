@@ -69,6 +69,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '复盘报告' }
       },
       {
+        path: 'quant-ranking',
+        name: 'QuantRankingPage',
+        component: () => import('@/views/quant/QuantRankingPage.vue'),
+        meta: { title: '量化排行' }
+      },
+      {
         path: 'sync',
         name: 'StockSync',
         component: () => import('@/views/stock/StockSync.vue'),

@@ -243,6 +243,7 @@ const sideItems: NavItem[] = [
   { key: 'AlertPage', label: '风控预警', icon: 'shield', path: '/alert' },
   { key: 'PerformancePage', label: '绩效分析', icon: 'trophy', path: '/performance' },
   { key: 'ReportPage', label: '复盘报告', icon: 'activity', path: '/report' },
+  { key: 'QuantRankingPage', label: '量化排行', icon: 'activity', path: '/quant-ranking' },
   { key: 'StockSync', label: '数据同步', icon: 'refresh', path: '/sync' },
   { key: 'OkxSettings', label: 'OKX 账户', icon: 'lock', path: '/okx' },
   { key: 'OkxSuggestions', label: '建议单确认', icon: 'check', path: '/okx/suggestions' },
